@@ -647,7 +647,7 @@ def change_password():
 
 @app.route('/api/auth/forgot-password', methods=['POST'])
 def forgot_password():
-    """Demander la réinitialisation de mot de passe — envoie un email avec un lien tokenisé."""
+    """Réinitialisation mot de passe — envoie un lien tokenisé par email (valable 1h)."""
     try:
         import secrets as _secrets
         data = request.get_json() or {}
@@ -658,10 +658,10 @@ def forgot_password():
         session = get_session()
         user = session.query(User).filter_by(email=email).first()
 
-        # Réponse générique pour éviter l'énumération d'emails
+        # Réponse générique même si l'email n'existe pas (évite l'énumération)
         if not user or not user.has_email:
             session.close()
-            return jsonify({'success': True, 'message': 'Si cet email existe, un lien a été envoyé.'})
+            return jsonify({'success': True, 'masked_email': None, 'email_sent': False})
 
         token = _secrets.token_urlsafe(32)
         user.reset_token = token
@@ -669,16 +669,21 @@ def forgot_password():
         session.commit()
 
         from flask import request as _req
-        base_url = _req.host_url.rstrip('/')
-        reset_link = f"{base_url}/app?reset_token={token}"
+        app_url = os.getenv('APP_URL', _req.host_url.rstrip('/'))
+        reset_link = f"{app_url}/app?reset_token={token}"
 
+        email_sent = False
         try:
-            send_password_reset_email(user.email, user.full_name, reset_link)
+            email_sent = send_password_reset_email(user.email, user.full_name, reset_link)
         except Exception as mail_err:
             print(f"⚠️ Erreur envoi email reset: {mail_err}")
 
+        # Masquer partiellement l'adresse email pour l'affichage
+        parts = (user.email or '').split('@')
+        masked = parts[0][:2] + '***@' + parts[1] if len(parts) == 2 and len(parts[0]) > 2 else user.email
+
         session.close()
-        return jsonify({'success': True, 'message': 'Si cet email existe, un lien a été envoyé.'})
+        return jsonify({'success': True, 'masked_email': masked, 'email_sent': email_sent})
     except Exception as e:
         print(f"❌ Erreur forgot_password: {e}")
         return jsonify({'error': str(e)}), 500
@@ -703,7 +708,10 @@ def reset_password():
         if not user:
             session.close()
             return jsonify({'error': 'Lien invalide ou déjà utilisé'}), 400
-        if user.reset_token_expires and utcnow() > user.reset_token_expires:
+        exp = user.reset_token_expires
+        if exp is not None and exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp is not None and utcnow() > exp:
             user.reset_token = None
             user.reset_token_expires = None
             session.commit()
