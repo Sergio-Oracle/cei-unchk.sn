@@ -137,63 +137,110 @@ function showForgotPasswordModal() {
 
     const modal = document.createElement('div');
     modal.id = 'forgot-pw-modal';
-    modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.55);';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);padding:16px;';
     modal.innerHTML = `
-        <div style="background:#fff;border-radius:14px;padding:32px;max-width:400px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
-            <div style="text-align:center;margin-bottom:20px;">
-                <span style="background:#eff6ff;border-radius:50%;width:52px;height:52px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:10px;">
-                    <i class="fas fa-key" style="color:#3b82f6;font-size:22px;"></i>
-                </span>
-                <h3 style="margin:0;font-size:18px;color:#0f172a;">Mot de passe oublié</h3>
-                <p style="margin:6px 0 0;font-size:13px;color:#64748b;">Entrez votre email — vous recevrez un lien de réinitialisation valable 1 heure.</p>
-            </div>
-            <div style="margin-bottom:16px;">
-                <label style="font-size:13px;font-weight:600;color:#374151;display:block;margin-bottom:6px;">
-                    <i class="fas fa-envelope"></i> Adresse email
-                </label>
-                <input id="forgot-pw-email" type="email" placeholder="votre@email.com"
-                    style="width:100%;padding:10px 14px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;box-sizing:border-box;">
-            </div>
-            <div id="forgot-pw-msg" style="display:none;margin-bottom:12px;"></div>
-            <div style="display:flex;gap:10px;">
+        <div id="forgot-pw-box" style="background:#fff;border-radius:16px;padding:36px 32px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.18);">
+            <!-- Étape 1 : saisie email -->
+            <div id="forgot-step-1">
+                <div style="text-align:center;margin-bottom:24px;">
+                    <div style="background:#eff6ff;border-radius:50%;width:60px;height:60px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:14px;">
+                        <i class="fas fa-lock" style="color:#3b82f6;font-size:26px;"></i>
+                    </div>
+                    <h3 style="margin:0 0 6px;font-size:20px;font-weight:700;color:#0f172a;">Mot de passe oublié ?</h3>
+                    <p style="margin:0;font-size:14px;color:#64748b;line-height:1.6;">Pas de problème. Entrez votre adresse email et nous vous enverrons un lien pour réinitialiser votre mot de passe.</p>
+                </div>
+                <div style="margin-bottom:20px;">
+                    <label style="font-size:13px;font-weight:600;color:#374151;display:block;margin-bottom:8px;">Adresse email</label>
+                    <input id="forgot-pw-email" type="email" placeholder="votre@email.com" autocomplete="email"
+                        style="width:100%;padding:12px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:15px;box-sizing:border-box;outline:none;transition:border-color .15s;"
+                        onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'"
+                        onkeydown="if(event.key==='Enter') submitForgotPassword()">
+                </div>
+                <div id="forgot-pw-err" style="display:none;background:#fef2f2;border:1px solid #fecaca;color:#dc2626;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:16px;"></div>
+                <button id="forgot-pw-send-btn" onclick="submitForgotPassword()"
+                    style="width:100%;padding:13px;background:#3b82f6;color:#fff;border:none;border-radius:10px;cursor:pointer;font-size:15px;font-weight:700;letter-spacing:.01em;transition:background .15s;"
+                    onmouseover="this.style.background='#2563eb'" onmouseout="this.style.background='#3b82f6'">
+                    Envoyer le lien de réinitialisation
+                </button>
                 <button onclick="document.getElementById('forgot-pw-modal').remove()"
-                    style="flex:1;padding:10px;border:1px solid #e2e8f0;background:transparent;border-radius:8px;cursor:pointer;font-size:14px;color:#374151;">
+                    style="width:100%;padding:10px;background:transparent;border:none;cursor:pointer;font-size:14px;color:#64748b;margin-top:10px;">
                     Annuler
                 </button>
-                <button onclick="submitForgotPassword()"
-                    style="flex:1;padding:10px;background:#3b82f6;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
-                    <i class="fas fa-paper-plane"></i> Envoyer
+            </div>
+
+            <!-- Étape 2 : confirmation (affichée après envoi) -->
+            <div id="forgot-step-2" style="display:none;text-align:center;">
+                <div style="background:#f0fdf4;border-radius:50%;width:70px;height:70px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:18px;">
+                    <i class="fas fa-envelope-open-text" style="color:#16a34a;font-size:30px;"></i>
+                </div>
+                <h3 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#0f172a;">Vérifiez votre boîte mail</h3>
+                <p id="forgot-sent-msg" style="margin:0 0 20px;font-size:14px;color:#475569;line-height:1.7;"></p>
+                <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;text-align:left;margin-bottom:20px;">
+                    <p style="margin:0;font-size:13px;color:#64748b;line-height:1.8;">
+                        <i class="fas fa-info-circle" style="color:#3b82f6;"></i>
+                        <strong>Vous ne le trouvez pas ?</strong><br>
+                        • Vérifiez votre dossier <strong>Spam / Indésirables</strong><br>
+                        • Le lien est valable <strong>1 heure</strong><br>
+                        • L'expéditeur est <strong>noreply@unchk.sn</strong> ou votre adresse SMTP configurée
+                    </p>
+                </div>
+                <button id="forgot-resend-btn" onclick="showForgotPasswordModal()"
+                    style="width:100%;padding:12px;background:transparent;border:1.5px solid #3b82f6;color:#3b82f6;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;margin-bottom:8px;">
+                    <i class="fas fa-redo"></i> Renvoyer un lien
+                </button>
+                <button onclick="document.getElementById('forgot-pw-modal').remove()"
+                    style="width:100%;padding:10px;background:transparent;border:none;cursor:pointer;font-size:14px;color:#64748b;">
+                    Retour à la connexion
                 </button>
             </div>
         </div>
     `;
     document.body.appendChild(modal);
     modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
-    setTimeout(() => document.getElementById('forgot-pw-email')?.focus(), 100);
+    setTimeout(() => document.getElementById('forgot-pw-email')?.focus(), 80);
 }
 
 async function submitForgotPassword() {
-    const email = document.getElementById('forgot-pw-email')?.value?.trim();
-    const msgEl = document.getElementById('forgot-pw-msg');
-    if (!email) {
-        if (msgEl) { msgEl.style.display='block'; msgEl.innerHTML='<div style="background:#fee2e2;color:#dc2626;padding:10px 14px;border-radius:8px;font-size:13px;">Veuillez entrer votre email.</div>'; }
-        return;
-    }
+    const emailInput = document.getElementById('forgot-pw-email');
+    const email = emailInput?.value?.trim() || '';
+    const errEl = document.getElementById('forgot-pw-err');
+    const sendBtn = document.getElementById('forgot-pw-send-btn');
+
+    const showErr = msg => {
+        if (errEl) { errEl.style.display = 'block'; errEl.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${msg}`; }
+        if (emailInput) emailInput.style.borderColor = '#fca5a5';
+    };
+
+    if (!email) return showErr('Veuillez entrer votre adresse email.');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showErr('Format d\'email invalide.');
+
+    if (errEl) errEl.style.display = 'none';
+    if (emailInput) emailInput.style.borderColor = '#e2e8f0';
+    if (sendBtn) { sendBtn.disabled = true; sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Envoi en cours...'; }
+
     try {
         const res = await fetch('/api/auth/forgot-password', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email })
         });
-        if (msgEl) {
-            msgEl.style.display = 'block';
-            msgEl.innerHTML = '<div style="background:#ecfdf5;color:#059669;padding:10px 14px;border-radius:8px;font-size:13px;"><i class="fas fa-check-circle"></i> Si cet email existe dans notre système, un lien vous a été envoyé.</div>';
+        const data = await res.json();
+
+        // Afficher l'étape 2 — confirmation
+        document.getElementById('forgot-step-1').style.display = 'none';
+        document.getElementById('forgot-step-2').style.display = 'block';
+
+        const sentMsg = document.getElementById('forgot-sent-msg');
+        if (sentMsg) {
+            if (data.masked_email) {
+                sentMsg.innerHTML = `Nous avons envoyé un lien de réinitialisation à <strong>${data.masked_email}</strong>.<br>Cliquez sur le lien dans l'email pour définir un nouveau mot de passe.`;
+            } else {
+                sentMsg.innerHTML = `Si cette adresse <strong>${email}</strong> est associée à un compte, vous recevrez un email sous quelques minutes.`;
+            }
         }
-        // Désactiver le bouton pour éviter le double envoi
-        const btn = document.querySelector('#forgot-pw-modal button:last-child');
-        if (btn) { btn.disabled = true; btn.textContent = 'Email envoyé'; }
     } catch(e) {
-        if (msgEl) { msgEl.style.display='block'; msgEl.innerHTML='<div style="background:#fee2e2;color:#dc2626;padding:10px 14px;border-radius:8px;font-size:13px;">Erreur réseau. Réessayez.</div>'; }
+        if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = 'Envoyer le lien de réinitialisation'; }
+        showErr('Erreur de connexion. Vérifiez votre réseau et réessayez.');
     }
 }
 
