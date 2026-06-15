@@ -181,7 +181,7 @@ function showForgotPasswordModal() {
                         <strong>Vous ne le trouvez pas ?</strong><br>
                         • Vérifiez votre dossier <strong>Spam / Indésirables</strong><br>
                         • Le lien est valable <strong>1 heure</strong><br>
-                        • L'expéditeur est <strong>noreply@unchk.sn</strong> ou votre adresse SMTP configurée
+                        • Expéditeur : <strong>CEI — Centre d'Examen Intelligent</strong>
                     </p>
                 </div>
                 <button id="forgot-resend-btn" onclick="showForgotPasswordModal()"

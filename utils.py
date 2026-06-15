@@ -801,7 +801,7 @@ def find_or_create_student(student_name, extracted_name, session):
 def send_password_reset_email(user_email, user_name, reset_link):
     """Email de réinitialisation de mot de passe — token valide 1 heure."""
     smtp_cfg = _smtp_config()
-    subject = "🔐 Réinitialisation de votre mot de passe CEI"
+    subject = "Réinitialisation de votre mot de passe CEI"
     html_body = f"""
     <!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f1f5f9;margin:0;padding:24px;">
     <div style="max-width:520px;margin:0 auto;background:white;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
