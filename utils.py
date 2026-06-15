@@ -417,7 +417,14 @@ def _send_direct_mx(to_email, msg_obj, from_email):
         return False
 
 
-def _build_msg(from_header, to_email, subject, html_body, text_body):
+def _app_domain(cfg):
+    """Extrait le domaine racine depuis APP_URL (ex: cei.ec2lt.sn → ec2lt.sn)."""
+    import urllib.parse
+    netloc = urllib.parse.urlparse(cfg.get('app_url', '')).netloc or 'cei.ec2lt.sn'
+    parts  = netloc.split('.')
+    return '.'.join(parts[-2:]) if len(parts) >= 2 else netloc
+
+def _build_msg(from_header, to_email, subject, html_body, text_body, domain='cei.ec2lt.sn'):
     """Construit un message multipart/alternative avec text+html (norme RFC 2046)."""
     from email.utils import formatdate, make_msgid
     msg = MIMEMultipart('alternative')
@@ -425,7 +432,7 @@ def _build_msg(from_header, to_email, subject, html_body, text_body):
     msg['To']         = to_email
     msg['Subject']    = subject
     msg['Date']       = formatdate(localtime=True)
-    msg['Message-ID'] = make_msgid(domain='unchk.sn')
+    msg['Message-ID'] = make_msgid(domain=domain)
     msg['X-Mailer']   = 'CEI Platform'
     # plain text en premier (RFC 2046 : le dernier est préféré → HTML sera choisi par défaut)
     msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
@@ -433,8 +440,9 @@ def _build_msg(from_header, to_email, subject, html_body, text_body):
     return msg
 
 def send_email(to_email, subject, html_body, attachments=None, text_body=None):
-    """Envoyer un email via SMTP université (smx7.unchk.sn), fallback livraison MX directe."""
-    cfg = _smtp_config()
+    """Envoyer un email via le SMTP configuré dans .env, fallback livraison MX directe."""
+    cfg    = _smtp_config()
+    domain = _app_domain(cfg)
 
     from email.header import Header
     if text_body is None:
@@ -447,7 +455,7 @@ def send_email(to_email, subject, html_body, attachments=None, text_body=None):
     except UnicodeEncodeError:
         from_header = f"{Header(cfg['from_name'], 'utf-8').encode()} <{cfg['from_email']}>"
 
-    msg = _build_msg(from_header, to_email, subject, html_body, text_body)
+    msg = _build_msg(from_header, to_email, subject, html_body, text_body, domain=domain)
 
     if attachments:
         for attachment in attachments:
@@ -462,7 +470,7 @@ def send_email(to_email, subject, html_body, attachments=None, text_body=None):
             except Exception as attach_error:
                 print(f"Erreur pièce jointe {attachment['filename']}: {attach_error}")
 
-    # Tentative 1 : SMTP université (smx7.unchk.sn port 587 STARTTLS)
+    # Tentative 1 : SMTP configuré dans .env (port 587 STARTTLS)
     if cfg['username'] and cfg['password']:
         try:
             with smtplib.SMTP(cfg['server'], cfg['port'], timeout=15) as server:
@@ -481,14 +489,14 @@ def send_email(to_email, subject, html_body, attachments=None, text_body=None):
         except Exception as e:
             print(f"Erreur SMTP ({e}) → basculement livraison directe")
 
-    # Tentative 2 : livraison directe MX (port 25) — expéditeur @unchk.sn pour SPF
-    direct_from = 'noreply@unchk.sn'
+    # Tentative 2 : livraison directe MX (port 25) — expéditeur dérivé de APP_URL pour SPF
+    direct_from = f"noreply@{domain}"
     try:
         cfg['from_name'].encode('ascii')
         from_header2 = f"{cfg['from_name']} <{direct_from}>"
     except UnicodeEncodeError:
         from_header2 = f"{Header(cfg['from_name'], 'utf-8').encode()} <{direct_from}>"
-    msg2 = _build_msg(from_header2, to_email, subject, html_body, text_body)
+    msg2 = _build_msg(from_header2, to_email, subject, html_body, text_body, domain=domain)
     return _send_direct_mx(to_email, msg2, direct_from)
 
 def send_account_created_email(user_email, user_name, role, temp_password=None):
