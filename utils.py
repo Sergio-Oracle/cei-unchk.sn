@@ -365,7 +365,7 @@ def generate_corrected_paper_pdf(paper_data, output_path):
     return output_path
 
 # ============================================================================
-# ENVOI D'EMAILS — SMTP université (smx7.unchk.sn) → fallback MX direct
+# ENVOI D'EMAILS — SMTP (config .env) → fallback livraison MX directe
 # ============================================================================
 
 def _get_mx_host(domain):
@@ -403,10 +403,10 @@ def _send_direct_mx(to_email, msg_obj, from_email):
     print(f"📡 Livraison directe → {mx_host}:25")
     try:
         with smtplib.SMTP(mx_host, 25, timeout=15) as s:
-            s.ehlo('unchk.sn')
+            s.ehlo()
             try:
                 s.starttls()
-                s.ehlo('unchk.sn')
+                s.ehlo()
             except Exception:
                 pass
             result = s.sendmail(from_email, [to_email], msg_obj.as_string())
@@ -811,8 +811,9 @@ def find_or_create_student(student_name, extracted_name, session):
 
 def send_password_reset_email(user_email, user_name, reset_link):
     """Email de réinitialisation de mot de passe — token valide 1 heure."""
-    smtp_cfg = _smtp_config()
-    app_url   = smtp_cfg.get('app_url', 'https://cei.unchk.sn')
+    smtp_cfg  = _smtp_config()
+    app_url   = smtp_cfg.get('app_url', 'https://cei.ec2lt.sn')
+    from_name = smtp_cfg.get('from_name', "CEI — Centre d'Examen Intelligent")
     subject   = "Réinitialisation de votre mot de passe CEI"
 
     # Icône cadenas SVG (inline — compatible Gmail, Apple Mail, Outlook Web)
@@ -845,7 +846,7 @@ def send_password_reset_email(user_email, user_name, reset_link):
   <div style="background:linear-gradient(135deg,#3b82f6 0%,#1d4ed8 100%);padding:36px;text-align:center;">
     <div style="margin-bottom:14px;">{lock_svg}</div>
     <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:700;line-height:1.3;">Réinitialisation du mot de passe</h1>
-    <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:14px;">Centre d'Examen Intelligent — UN-CHK</p>
+    <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:14px;">{from_name}</p>
   </div>
 
   <!-- Corps -->
