@@ -417,24 +417,37 @@ def _send_direct_mx(to_email, msg_obj, from_email):
         return False
 
 
-def send_email(to_email, subject, html_body, attachments=None):
+def _build_msg(from_header, to_email, subject, html_body, text_body):
+    """Construit un message multipart/alternative avec text+html (norme RFC 2046)."""
+    from email.utils import formatdate, make_msgid
+    msg = MIMEMultipart('alternative')
+    msg['From']       = from_header
+    msg['To']         = to_email
+    msg['Subject']    = subject
+    msg['Date']       = formatdate(localtime=True)
+    msg['Message-ID'] = make_msgid(domain='unchk.sn')
+    msg['X-Mailer']   = 'CEI Platform'
+    # plain text en premier (RFC 2046 : le dernier est préféré → HTML sera choisi par défaut)
+    msg.attach(MIMEText(text_body, 'plain', 'utf-8'))
+    msg.attach(MIMEText(html_body, 'html',  'utf-8'))
+    return msg
+
+def send_email(to_email, subject, html_body, attachments=None, text_body=None):
     """Envoyer un email via SMTP université (smx7.unchk.sn), fallback livraison MX directe."""
     cfg = _smtp_config()
 
-    from email.utils import formatdate, make_msgid
     from email.header import Header
-    msg = MIMEMultipart('alternative')
+    if text_body is None:
+        import re
+        text_body = re.sub(r'<[^>]+>', '', html_body).strip()
+
     try:
         cfg['from_name'].encode('ascii')
         from_header = f"{cfg['from_name']} <{cfg['from_email']}>"
     except UnicodeEncodeError:
         from_header = f"{Header(cfg['from_name'], 'utf-8').encode()} <{cfg['from_email']}>"
-    msg['From'] = from_header
-    msg['To'] = to_email
-    msg['Subject'] = subject
-    msg['Date'] = formatdate(localtime=True)
-    msg['Message-ID'] = make_msgid(domain='unchk.sn')
-    msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+
+    msg = _build_msg(from_header, to_email, subject, html_body, text_body)
 
     if attachments:
         for attachment in attachments:
@@ -447,7 +460,7 @@ def send_email(to_email, subject, html_body, attachments=None):
                                    f"attachment; filename= {attachment['filename']}")
                     msg.attach(part)
             except Exception as attach_error:
-                print(f"⚠️ Erreur pièce jointe {attachment['filename']}: {attach_error}")
+                print(f"Erreur pièce jointe {attachment['filename']}: {attach_error}")
 
     # Tentative 1 : SMTP université (smx7.unchk.sn port 587 STARTTLS)
     if cfg['username'] and cfg['password']:
@@ -458,34 +471,24 @@ def send_email(to_email, subject, html_body, attachments=None):
                 server.ehlo()
                 server.login(cfg['username'], cfg['password'])
                 server.send_message(msg)
-            print(f"✅ Email envoyé à {to_email} (via {cfg['server']})")
+            print(f"Email envoyé à {to_email} (via {cfg['server']})")
             return True
         except (ConnectionResetError, OSError, smtplib.SMTPServerDisconnected) as conn_err:
-            print(f"⚠️ SMTP {cfg['server']} inaccessible ({conn_err}) → basculement livraison directe")
+            print(f"SMTP {cfg['server']} inaccessible ({conn_err}) → basculement livraison directe")
         except smtplib.SMTPException as smtp_error:
-            print(f"❌ Erreur SMTP envoi email à {to_email}: {smtp_error}")
+            print(f"Erreur SMTP envoi email à {to_email}: {smtp_error}")
             return False
         except Exception as e:
-            print(f"⚠️ Erreur SMTP ({e}) → basculement livraison directe")
+            print(f"Erreur SMTP ({e}) → basculement livraison directe")
 
-    # Tentative 2 : livraison directe au serveur MX du destinataire (port 25)
-    # Utilise @unchk.sn comme expéditeur — son SPF couvre l'IP du serveur (102.36.138.0/23)
-    # Un from @gmail.com serait rejeté car notre IP n'est pas dans le SPF de gmail.com
+    # Tentative 2 : livraison directe MX (port 25) — expéditeur @unchk.sn pour SPF
     direct_from = 'noreply@unchk.sn'
-    # Reconstruire le message avec le bon expéditeur pour SPF
-    from email.utils import formatdate, make_msgid
-    from email.header import Header
-    msg2 = MIMEMultipart('alternative')
     try:
         cfg['from_name'].encode('ascii')
-        msg2['From'] = f"{cfg['from_name']} <{direct_from}>"
+        from_header2 = f"{cfg['from_name']} <{direct_from}>"
     except UnicodeEncodeError:
-        msg2['From'] = f"{Header(cfg['from_name'], 'utf-8').encode()} <{direct_from}>"
-    msg2['To'] = to_email
-    msg2['Subject'] = subject
-    msg2['Date'] = formatdate(localtime=True)
-    msg2['Message-ID'] = make_msgid(domain='unchk.sn')
-    msg2.attach(MIMEText(html_body, 'html', 'utf-8'))
+        from_header2 = f"{Header(cfg['from_name'], 'utf-8').encode()} <{direct_from}>"
+    msg2 = _build_msg(from_header2, to_email, subject, html_body, text_body)
     return _send_direct_mx(to_email, msg2, direct_from)
 
 def send_account_created_email(user_email, user_name, role, temp_password=None):
@@ -801,42 +804,108 @@ def find_or_create_student(student_name, extracted_name, session):
 def send_password_reset_email(user_email, user_name, reset_link):
     """Email de réinitialisation de mot de passe — token valide 1 heure."""
     smtp_cfg = _smtp_config()
-    subject = "Réinitialisation de votre mot de passe CEI"
-    html_body = f"""
-    <!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f1f5f9;margin:0;padding:24px;">
-    <div style="max-width:520px;margin:0 auto;background:white;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
-        <div style="background:linear-gradient(135deg,#3b82f6,#1d4ed8);padding:32px 36px;text-align:center;">
-            <div style="font-size:36px;margin-bottom:8px;">🔐</div>
-            <h1 style="color:white;margin:0;font-size:22px;font-weight:700;">Réinitialisation du mot de passe</h1>
-            <p style="color:rgba(255,255,255,.85);margin:6px 0 0;font-size:14px;">Centre d'Examen Intelligent</p>
-        </div>
-        <div style="padding:32px 36px;">
-            <p style="color:#1e293b;font-size:15px;margin:0 0 16px;">Bonjour <strong>{user_name}</strong>,</p>
-            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 24px;">
-                Nous avons reçu une demande de réinitialisation du mot de passe de votre compte CEI.<br>
-                Cliquez sur le bouton ci-dessous pour définir un nouveau mot de passe.
-            </p>
-            <div style="text-align:center;margin:28px 0;">
-                <a href="{reset_link}" style="display:inline-block;background:#3b82f6;color:white;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">
-                    Réinitialiser mon mot de passe
-                </a>
-            </div>
-            <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:14px 16px;margin-top:8px;">
-                <p style="margin:0;font-size:13px;color:#92400e;">
-                    <strong>⚠️ Ce lien expire dans 1 heure.</strong><br>
-                    Si vous n'avez pas demandé cette réinitialisation, ignorez cet email — votre mot de passe reste inchangé.
-                </p>
-            </div>
-        </div>
-        <div style="background:#f8fafc;padding:16px 36px;text-align:center;">
-            <p style="margin:0;font-size:12px;color:#94a3b8;">
-                CEI — Centre d'Examen Intelligent &nbsp;|&nbsp; {smtp_cfg.get('app_url','https://cei.unchk.sn')}
-            </p>
-        </div>
+    app_url   = smtp_cfg.get('app_url', 'https://cei.unchk.sn')
+    subject   = "Réinitialisation de votre mot de passe CEI"
+
+    # Icône cadenas SVG (inline — compatible Gmail, Apple Mail, Outlook Web)
+    lock_svg = (
+        '<svg width="52" height="52" viewBox="0 0 24 24" fill="none" '
+        'xmlns="http://www.w3.org/2000/svg" style="display:inline-block;">'
+        '<rect x="5" y="11" width="14" height="10" rx="2" fill="white"/>'
+        '<path d="M8 11V7a4 4 0 0 1 8 0v4" stroke="white" stroke-width="2.5" '
+        'stroke-linecap="round" stroke-linejoin="round"/>'
+        '<circle cx="12" cy="16" r="1.5" fill="#3b82f6"/>'
+        '</svg>'
+    )
+    # Icône avertissement SVG
+    warn_svg = (
+        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" '
+        'style="display:inline-block;vertical-align:middle;margin-right:5px;">'
+        '<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3'
+        'L13.71 3.86a2 2 0 00-3.42 0z" fill="#fde68a" stroke="#92400e" stroke-width="1.5"/>'
+        '<line x1="12" y1="9" x2="12" y2="13" stroke="#92400e" stroke-width="2" stroke-linecap="round"/>'
+        '<circle cx="12" cy="17" r="1" fill="#92400e"/>'
+        '</svg>'
+    )
+
+    html_body = f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:Arial,Helvetica,sans-serif;background:#f1f5f9;margin:0;padding:24px;">
+<div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+  <!-- En-tête -->
+  <div style="background:linear-gradient(135deg,#3b82f6 0%,#1d4ed8 100%);padding:36px;text-align:center;">
+    <div style="margin-bottom:14px;">{lock_svg}</div>
+    <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:700;line-height:1.3;">Réinitialisation du mot de passe</h1>
+    <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:14px;">Centre d'Examen Intelligent — UN-CHK</p>
+  </div>
+
+  <!-- Corps -->
+  <div style="padding:36px;">
+    <p style="color:#1e293b;font-size:15px;margin:0 0 14px;">Bonjour <strong>{user_name}</strong>,</p>
+    <p style="color:#475569;font-size:14px;line-height:1.8;margin:0 0 28px;">
+      Nous avons reçu une demande de réinitialisation du mot de passe associé à votre compte CEI.<br>
+      Cliquez sur le bouton ci-dessous pour définir un nouveau mot de passe.
+    </p>
+
+    <!-- Bouton CTA -->
+    <div style="text-align:center;margin:0 0 28px;">
+      <a href="{reset_link}"
+         style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;
+                padding:15px 36px;border-radius:10px;font-weight:700;font-size:15px;
+                letter-spacing:0.01em;">
+        Réinitialiser mon mot de passe
+      </a>
     </div>
-    </body></html>
-    """
-    return send_email(user_email, subject, html_body)
+
+    <!-- Lien texte de secours -->
+    <p style="font-size:12px;color:#94a3b8;text-align:center;margin:0 0 24px;word-break:break-all;">
+      Bouton non cliquable ? Copiez ce lien dans votre navigateur :<br>
+      <a href="{reset_link}" style="color:#3b82f6;">{reset_link}</a>
+    </p>
+
+    <!-- Avertissement expiration -->
+    <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:14px 16px;">
+      <p style="margin:0;font-size:13px;color:#92400e;line-height:1.7;">
+        {warn_svg}<strong>Ce lien expire dans 1 heure.</strong><br>
+        Si vous n'avez pas demandé cette réinitialisation, ignorez simplement cet email.
+        Votre mot de passe reste inchangé.
+      </p>
+    </div>
+  </div>
+
+  <!-- Pied de page -->
+  <div style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:16px 36px;text-align:center;">
+    <p style="margin:0;font-size:12px;color:#94a3b8;">
+      CEI — Centre d'Examen Intelligent &nbsp;·&nbsp; <a href="{app_url}" style="color:#64748b;text-decoration:none;">{app_url}</a>
+    </p>
+  </div>
+
+</div>
+</body></html>"""
+
+    # Version texte brut (obligatoire pour éviter le spam)
+    text_body = f"""Réinitialisation de votre mot de passe CEI
+==========================================
+
+Bonjour {user_name},
+
+Nous avons reçu une demande de réinitialisation du mot de passe de votre compte CEI.
+
+Cliquez sur le lien ci-dessous pour définir un nouveau mot de passe :
+
+{reset_link}
+
+IMPORTANT : Ce lien expire dans 1 heure.
+
+Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.
+Votre mot de passe reste inchangé.
+
+---
+CEI — Centre d'Examen Intelligent
+{app_url}
+"""
+    return send_email(user_email, subject, html_body, text_body=text_body)
 
 
 def generate_transcript_pdf(transcript_data, output_path):

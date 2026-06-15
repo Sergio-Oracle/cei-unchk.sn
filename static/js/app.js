@@ -173,15 +173,15 @@ function showForgotPasswordModal() {
                 <div style="background:#f0fdf4;border-radius:50%;width:70px;height:70px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:18px;">
                     <i class="fas fa-envelope-open-text" style="color:#16a34a;font-size:30px;"></i>
                 </div>
-                <h3 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#0f172a;">Vérifiez votre boîte mail</h3>
+                <h3 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#0f172a;">Email envoyé !</h3>
                 <p id="forgot-sent-msg" style="margin:0 0 20px;font-size:14px;color:#475569;line-height:1.7;"></p>
                 <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;text-align:left;margin-bottom:20px;">
-                    <p style="margin:0;font-size:13px;color:#64748b;line-height:1.8;">
-                        <i class="fas fa-info-circle" style="color:#3b82f6;"></i>
-                        <strong>Vous ne le trouvez pas ?</strong><br>
-                        • Vérifiez votre dossier <strong>Spam / Indésirables</strong><br>
+                    <p style="margin:0;font-size:13px;color:#64748b;line-height:1.9;">
+                        <strong style="color:#0f172a;">Vous ne le trouvez pas ?</strong><br>
+                        • L'email arrive dans votre <strong>boîte de réception</strong> en quelques minutes<br>
                         • Le lien est valable <strong>1 heure</strong><br>
-                        • Expéditeur : <strong>CEI — Centre d'Examen Intelligent</strong>
+                        • Expéditeur : <strong>CEI — Centre d'Examen Intelligent</strong><br>
+                        • Absent après 5 min ? Consultez aussi les <strong>Spams / Indésirables</strong>
                     </p>
                 </div>
                 <button id="forgot-resend-btn" onclick="showForgotPasswordModal()"
