@@ -245,40 +245,47 @@ async function submitForgotPassword() {
 }
 
 function showResetPasswordScreen(token) {
-    // Cacher l'écran de connexion et afficher le formulaire de réinitialisation
     const loginScreen = document.getElementById('login-screen');
     if (loginScreen) loginScreen.style.display = 'none';
 
     const wrap = document.createElement('div');
     wrap.id = 'reset-pw-screen';
-    wrap.className = 'auth-screen';
-    wrap.style.cssText = 'display:flex;min-height:100vh;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);';
+    // position:fixed + z-index élevé pour ne pas être bloqué par les overlays existants
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:20px;box-sizing:border-box;';
     wrap.innerHTML = `
-        <div style="background:#fff;border-radius:16px;padding:36px;max-width:420px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,0.18);">
-            <div style="text-align:center;margin-bottom:24px;">
-                <span style="background:#eff6ff;border-radius:50%;width:60px;height:60px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px;">
-                    <i class="fas fa-lock" style="color:#3b82f6;font-size:26px;"></i>
-                </span>
-                <h2 style="margin:0;font-size:20px;color:#0f172a;">Nouveau mot de passe</h2>
-                <p style="margin:6px 0 0;font-size:13px;color:#64748b;">Choisissez un mot de passe sécurisé (min. 8 caractères).</p>
+        <div style="background:#fff;border-radius:16px;padding:36px 32px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.25);position:relative;z-index:1;">
+            <div style="text-align:center;margin-bottom:28px;">
+                <div style="background:#eff6ff;border-radius:50%;width:64px;height:64px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:14px;">
+                    <i class="fas fa-lock" style="color:#3b82f6;font-size:28px;"></i>
+                </div>
+                <h2 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#0f172a;">Nouveau mot de passe</h2>
+                <p style="margin:0;font-size:14px;color:#64748b;line-height:1.5;">Choisissez un mot de passe sécurisé (min. 8 caractères).</p>
             </div>
-            <div style="margin-bottom:14px;">
-                <label style="font-size:13px;font-weight:600;color:#374151;display:block;margin-bottom:6px;"><i class="fas fa-lock"></i> Nouveau mot de passe</label>
-                <input id="reset-pw-new" type="password" placeholder="••••••••"
-                    style="width:100%;padding:10px 14px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;box-sizing:border-box;">
+            <div style="margin-bottom:16px;">
+                <label style="font-size:13px;font-weight:600;color:#374151;display:block;margin-bottom:7px;">
+                    <i class="fas fa-lock" style="color:#3b82f6;"></i> Nouveau mot de passe
+                </label>
+                <input id="reset-pw-new" type="password" placeholder="••••••••" autocomplete="new-password"
+                    style="width:100%;padding:12px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:15px;box-sizing:border-box;outline:none;font-family:inherit;"
+                    onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'">
             </div>
-            <div style="margin-bottom:20px;">
-                <label style="font-size:13px;font-weight:600;color:#374151;display:block;margin-bottom:6px;"><i class="fas fa-lock"></i> Confirmer le mot de passe</label>
-                <input id="reset-pw-confirm" type="password" placeholder="••••••••"
-                    style="width:100%;padding:10px 14px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;box-sizing:border-box;">
+            <div style="margin-bottom:22px;">
+                <label style="font-size:13px;font-weight:600;color:#374151;display:block;margin-bottom:7px;">
+                    <i class="fas fa-lock" style="color:#3b82f6;"></i> Confirmer le mot de passe
+                </label>
+                <input id="reset-pw-confirm" type="password" placeholder="••••••••" autocomplete="new-password"
+                    style="width:100%;padding:12px 14px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:15px;box-sizing:border-box;outline:none;font-family:inherit;"
+                    onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'"
+                    onkeydown="if(event.key==='Enter') submitResetPassword('${token}')">
             </div>
-            <div id="reset-pw-msg" style="display:none;margin-bottom:14px;"></div>
+            <div id="reset-pw-msg" style="display:none;margin-bottom:16px;"></div>
             <button onclick="submitResetPassword('${token}')"
-                style="width:100%;padding:12px;background:#3b82f6;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:15px;font-weight:700;">
+                style="width:100%;padding:13px;background:#3b82f6;color:#fff;border:none;border-radius:10px;cursor:pointer;font-size:15px;font-weight:700;letter-spacing:.01em;"
+                onmouseover="this.style.background='#2563eb'" onmouseout="this.style.background='#3b82f6'">
                 <i class="fas fa-check"></i> Enregistrer le nouveau mot de passe
             </button>
-            <p style="text-align:center;margin:14px 0 0;">
-                <a href="/app" style="font-size:13px;color:#64748b;text-decoration:none;">
+            <p style="text-align:center;margin:16px 0 0;">
+                <a href="/app" style="font-size:14px;color:#64748b;text-decoration:none;">
                     <i class="fas fa-arrow-left"></i> Retour à la connexion
                 </a>
             </p>
