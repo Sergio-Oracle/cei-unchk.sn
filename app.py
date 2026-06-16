@@ -4661,7 +4661,7 @@ def unban_exam_attempt(attempt_id):
             session.close()
             return jsonify({'error': 'Tentative introuvable'}), 404
 
-        if user.role == UserRole.PROFESSOR and attempt.exam.professor_id != user_id:
+        if user.role == UserRole.PROFESSOR and attempt.exam.created_by_id != user_id:
             session.close()
             return jsonify({'error': 'Vous ne pouvez lever que les bannissements de vos propres examens'}), 403
 
@@ -4717,7 +4717,7 @@ def export_exam_results_csv(exam_id):
             session.close()
             return jsonify({'error': 'Examen introuvable'}), 404
 
-        if user.role == UserRole.PROFESSOR and exam.professor_id != user_id:
+        if user.role == UserRole.PROFESSOR and exam.created_by_id != user_id:
             session.close()
             return jsonify({'error': 'Accès réservé au professeur propriétaire de cet examen'}), 403
 
@@ -5019,7 +5019,7 @@ def get_exam_stats(exam_id):
             session.close()
             return jsonify({'error': 'Examen non trouvé'}), 404
         attempts = session.query(ExamAttempt).filter_by(exam_id=exam_id).all()
-        done = [a for a in attempts if a.status.value in ('submitted', 'auto_submitted', 'graded')]
+        done = [a for a in attempts if a.status.value in ('submitted', 'auto_submitted')]
         scores = [a.score for a in done if a.score is not None]
         distribution = [0] * 5  # [0-4, 5-9, 10-13, 14-16, 17-20]
         for s in scores:
@@ -5039,7 +5039,7 @@ def get_exam_stats(exam_id):
             'submitted':        len(done),
             'in_progress':      sum(1 for a in attempts if a.status.value == 'in_progress'),
             'banned':           sum(1 for a in attempts if a.status.value == 'banned'),
-            'corrected':        len(scores),
+            'corrected':        sum(1 for a in done if a.score is not None),
             'avg_score':        round(sum(scores)/len(scores), 2) if scores else None,
             'median_score':     round(statistics.median(scores), 2) if scores else None,
             'min_score':        min(scores) if scores else None,
@@ -5090,9 +5090,8 @@ def manual_grade_attempt(attempt_id):
         if not (0 <= score <= 20):
             session.close()
             return jsonify({'error': 'Note doit être entre 0 et 20'}), 400
-        attempt.score    = score
-        attempt.feedback = feedback
-        attempt.status   = AttemptStatus.GRADED
+        attempt.score          = score
+        attempt.feedback       = feedback
         attempt.corrected_at   = utcnow()
         attempt.corrected_by_id = user_id
         session.commit()
@@ -5260,7 +5259,7 @@ def download_integrity_report(attempt_id):
             return jsonify({'error': 'Tentative non trouvée'}), 404
         student = attempt.student
         exam    = attempt.exam
-        logs    = session.query(ExamActivityLog).filter_by(attempt_id=attempt_id).order_by(ExamActivityLog.created_at).all()
+        logs    = session.query(ExamActivityLog).filter_by(attempt_id=attempt_id).order_by(ExamActivityLog.timestamp).all()
         session.close()
 
         buf = io.BytesIO()
@@ -5351,8 +5350,8 @@ def download_integrity_report(attempt_id):
             story.append(Paragraph('Chronologie des événements', h2_style))
             log_data = [['Heure', 'Type', 'Détail']]
             for log in logs[:50]:
-                ts = log.created_at.strftime('%H:%M:%S') if log.created_at else '—'
-                detail = (log.details or '')[:80]
+                ts = log.timestamp.strftime('%H:%M:%S') if log.timestamp else '—'
+                detail = (log.event_data or '')[:80]
                 log_data.append([ts, log.event_type or '?', detail])
             lt = Table(log_data, colWidths=[2*cm, 4*cm, 11*cm])
             lt.setStyle(TableStyle([

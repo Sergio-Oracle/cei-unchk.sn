@@ -8853,7 +8853,7 @@ async function viewExamSubmissions(examId) {
         if (!exam) { showAlert('Examen introuvable.', 'error'); showLoader(false); return; }
 
         const inProgress = attempts.filter(a => a.status === 'in_progress');
-        const done       = attempts.filter(a => ['submitted','auto_submitted','graded'].includes(a.status));
+        const done       = attempts.filter(a => ['submitted','auto_submitted'].includes(a.status));
         const banned     = attempts.filter(a => a.status === 'banned');
 
         const th = (label) => `<th style="padding:9px 12px;text-align:left;border-bottom:2px solid #e2e8f0;font-size:11px;text-transform:uppercase;color:#64748b;font-weight:600;">${label}</th>`;
@@ -11302,12 +11302,13 @@ async function showStudentExamHistory() {
         const resp = await authenticatedFetch('/api/student/exam-history');
         const d    = await resp.json();
         const history = d.history || [];
-        const statusBadge = (s) => {
+        const statusBadge = (s, corrected_at) => {
+            // Si l'examen a été corrigé (score défini), on le signale peu importe le statut
+            if (corrected_at) return `<span style="color:#10b981;background:#d1fae5;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;">Corrigé</span>`;
             const map = {
                 in_progress:   ['#f59e0b', '#fef3c7', 'En cours'],
                 submitted:     ['#6366f1', '#ede9fe', 'Soumis'],
                 auto_submitted:['#8b5cf6', '#ede9fe', 'Auto-soumis'],
-                graded:        ['#10b981', '#d1fae5', 'Corrigé'],
                 banned:        ['#ef4444', '#fee2e2', 'Exclu'],
             };
             const [tc, bg, label] = map[s] || ['#64748b','#f1f5f9', s];
@@ -11325,7 +11326,7 @@ async function showStudentExamHistory() {
                 return `<tr style="border-bottom:1px solid #f1f5f9;">
                     <td style="padding:10px 12px;font-size:13px;"><strong>${h.exam_title}</strong><br>
                         <span style="font-size:10px;color:#94a3b8;">${date}</span></td>
-                    <td style="padding:10px 12px;">${statusBadge(h.status)}</td>
+                    <td style="padding:10px 12px;">${statusBadge(h.status, h.corrected_at)}</td>
                     <td style="padding:10px 12px;text-align:center;">${score}</td>
                     <td style="padding:10px 12px;text-align:center;font-size:12px;">${dur}</td>
                     <td style="padding:10px 12px;text-align:center;">
