@@ -4097,6 +4097,7 @@ def get_exam_attempt_subject(attempt_id):
             # Infos exam/tentative pour la page proctorée
             'exam_title': attempt.exam.title,
             'duration_minutes': attempt.exam.duration_minutes,
+            'extra_minutes': attempt.extra_minutes or 0,
             'started_at': attempt.started_at.isoformat() if attempt.started_at else None,
             'current_answer': current_answer,
         }
@@ -5078,6 +5079,75 @@ def get_exam_stats(exam_id):
         })
     except Exception as e:
         print(f"❌ get_exam_stats {exam_id}: {e}")
+        try: session.close()
+        except: pass
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# BILAN PAR ÉTUDIANT
+# ============================================================================
+
+@app.route('/api/online_exams/<int:exam_id>/bilan', methods=['GET'])
+@jwt_required()
+def get_exam_bilan(exam_id):
+    """Liste détaillée par étudiant : score, risque, durée, statut, extra-temps, notes."""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if not user or user.role not in [UserRole.PROFESSOR, UserRole.ADMIN]:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        exam = session.query(OnlineExam).filter_by(id=exam_id).first()
+        if not exam:
+            session.close()
+            return jsonify({'error': 'Examen non trouvé'}), 404
+
+        from sqlalchemy import func as sa_func
+        attempts = session.query(ExamAttempt).filter_by(exam_id=exam_id).all()
+
+        # Compter les notes de surveillance par tentative
+        from models import ProctoringEvent
+        note_counts = {}
+        if attempts:
+            ids = [a.id for a in attempts]
+            rows = session.query(
+                ProctoringEvent.attempt_id,
+                sa_func.count(ProctoringEvent.id)
+            ).filter(
+                ProctoringEvent.attempt_id.in_(ids),
+                ProctoringEvent.event_type == 'proctor_note'
+            ).group_by(ProctoringEvent.attempt_id).all()
+            note_counts = {r[0]: r[1] for r in rows}
+
+        rows_out = []
+        for a in attempts:
+            duration_min = None
+            if a.submitted_at and a.started_at:
+                duration_min = round((a.submitted_at - a.started_at).total_seconds() / 60, 1)
+            status_val = (a.status.value if hasattr(a.status, 'value') else str(a.status)) if a.status else ''
+            rows_out.append({
+                'attempt_id':    a.id,
+                'student_name':  a.student.full_name if a.student else '—',
+                'student_email': a.student.email if a.student else '—',
+                'status':        status_val,
+                'score':         a.score,
+                'feedback':      a.feedback or '',
+                'risk_score':    a.risk_score or 0,
+                'extra_minutes': a.extra_minutes or 0,
+                'duration_min':  duration_min,
+                'submitted_at':  a.submitted_at.isoformat() if a.submitted_at else None,
+                'corrected_at':  a.corrected_at.isoformat() if a.corrected_at else None,
+                'note_count':    note_counts.get(a.id, 0),
+            })
+
+        rows_out.sort(key=lambda r: (r['status'] != 'submitted', -(r['score'] or -1)))
+        exam_title = exam.title
+        session.close()
+        return jsonify({'exam_title': exam_title, 'attempts': rows_out})
+    except Exception as e:
+        print(f"❌ get_exam_bilan {exam_id}: {e}")
         try: session.close()
         except: pass
         return jsonify({'error': str(e)}), 500

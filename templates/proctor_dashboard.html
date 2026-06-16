@@ -1099,6 +1099,7 @@ async function loadData() {
     document.getElementById('exam-title').textContent = data.exam_title || 'Examen';
 
     updateStats();
+    _checkHighRiskAlerts(studentsData);
     // Grille caméra : toujours rendue (enseignant voit tous les groupes, surveillant voit le sien)
     renderGrid();
     renderCompletedPanel();
@@ -3147,6 +3148,44 @@ function _showLivekitBanner(msg, color, permanent = false) {
 function _hideLivekitBanner() {
     const b = document.getElementById('livekit-reconnect-banner');
     if (b) b.remove();
+}
+
+// ── ALERTES HAUT RISQUE ──────────────────────────────────────────────────────
+let _prevRiskMap = new Map(); // attemptId → risk_score précédent
+
+function _playBeep(freq = 880, dur = 0.25, vol = 0.4) {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(vol, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + dur);
+    } catch (_) {}
+}
+
+function _checkHighRiskAlerts(students) {
+    students.forEach(s => {
+        const prev = _prevRiskMap.get(s.attempt_id) ?? 0;
+        const cur  = s.risk_score || 0;
+        // Alerte si on franchit 70 % pour la première fois (prev < 70, cur >= 70)
+        if (prev < 70 && cur >= 70 && !s.banned) {
+            _playBeep(880, 0.2, 0.5);
+            setTimeout(() => _playBeep(660, 0.2, 0.4), 250);
+            // Toast rouge persistant 8s
+            const t = document.createElement('div');
+            t.style.cssText = 'position:fixed;top:70px;right:20px;background:#ef4444;color:white;padding:12px 18px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 4px 20px rgba(239,68,68,.4);max-width:280px;';
+            t.innerHTML = `<i class="fas fa-exclamation-triangle" style="margin-right:8px;"></i><strong>Haut risque</strong><br>${s.student_name} — ${cur}%`;
+            document.body.appendChild(t);
+            setTimeout(() => t.remove(), 8000);
+        }
+        _prevRiskMap.set(s.attempt_id, cur);
+    });
 }
 
 // ── TEMPS SUPPLÉMENTAIRE ────────────────────────────────────────────────────

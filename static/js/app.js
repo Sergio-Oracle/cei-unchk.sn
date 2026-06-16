@@ -8861,7 +8861,7 @@ async function viewExamSubmissions(examId) {
 
         // ── Section En cours ────────────────────────────────
         const inProgressRows = inProgress.length === 0
-            ? `<tr><td colspan="4" style="${tdStyle}text-align:center;color:#94a3b8;">Aucun étudiant en cours</td></tr>`
+            ? `<tr><td colspan="5" style="${tdStyle}text-align:center;color:#94a3b8;">Aucun étudiant en cours</td></tr>`
             : inProgress.map(a => `
                 <tr>
                     <td style="${tdStyle}"><strong>${a.student_name||'N/A'}</strong><br><small style="color:#64748b;">${a.student_email||''}</small></td>
@@ -8873,6 +8873,18 @@ async function viewExamSubmissions(examId) {
                         <span style="background:rgba(16,185,129,.1);color:#059669;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700;">
                             <i class="fas fa-circle" style="font-size:7px;margin-right:4px;"></i>En cours
                         </span>
+                    </td>
+                    <td style="${tdStyle}">
+                        <div style="display:flex;gap:5px;">
+                            <button class="btn btn-sm" onclick="grantExtraTime(${a.id},'${(a.student_name||'').replace(/'/g,"\\'")}') "
+                                style="background:#dcfce7;color:#16a34a;font-size:10px;padding:4px 9px;" title="Accorder du temps supplémentaire">
+                                <i class="fas fa-clock"></i> +temps
+                            </button>
+                            <button class="btn btn-sm" onclick="addProctorNote(${a.id},'${(a.student_name||'').replace(/'/g,"\\'")}') "
+                                style="background:#e0f2fe;color:#0284c7;font-size:10px;padding:4px 9px;" title="Note de surveillance">
+                                <i class="fas fa-sticky-note"></i> Note
+                            </button>
+                        </div>
                     </td>
                 </tr>`).join('');
 
@@ -8927,12 +8939,8 @@ async function viewExamSubmissions(examId) {
                                 style="background:#fef3c7;color:#d97706;font-size:10px;padding:4px 8px;" title="Rapport intégrité PDF">
                                 <i class="fas fa-file-pdf"></i>
                             </button>
-                            <button class="btn btn-sm" onclick="grantExtraTime(${a.id},'${(a.student_name||'').replace(/'/g,"\\'")}') "
-                                style="background:#dcfce7;color:#16a34a;font-size:10px;padding:4px 8px;" title="Accorder du temps supplémentaire">
-                                <i class="fas fa-clock"></i>+
-                            </button>
-                            <button class="btn btn-sm" onclick="addProctorNote(${a.id},'${(a.student_name||'').replace(/'/g,"\\'")}') "
-                                style="background:#e0f2fe;color:#0284c7;font-size:10px;padding:4px 8px;" title="Note de surveillance">
+                            <button class="btn btn-sm" onclick="viewProctorNotes(${a.id},'${(a.student_name||'').replace(/'/g,"\\'")}') "
+                                style="background:#e0f2fe;color:#0284c7;font-size:10px;padding:4px 8px;" title="Voir les notes de surveillance">
                                 <i class="fas fa-sticky-note"></i>
                             </button>
                         </div>
@@ -8989,6 +8997,10 @@ async function viewExamSubmissions(examId) {
                         style="background:#fef3c7;color:#d97706;font-size:12px;padding:6px 12px;">
                         <i class="fas fa-qrcode"></i> QR Code
                     </button>
+                    <button class="btn btn-sm" onclick="showExamBilan(${examId},'${(exam.title||'').replace(/'/g,'').replace(/"/g,'')}')"
+                        style="background:#e0f2fe;color:#0369a1;font-size:12px;padding:6px 12px;">
+                        <i class="fas fa-list-alt"></i> Bilan
+                    </button>
                 </div>
             </div>
 
@@ -9000,7 +9012,7 @@ async function viewExamSubmissions(examId) {
                 </div>
                 <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:8px;">
                     <table style="width:100%;border-collapse:collapse;">
-                        <thead><tr style="background:#f8fafc;">${th('Étudiant')}${th('Démarré')}${th('Alertes')}${th('Statut')}</tr></thead>
+                        <thead><tr style="background:#f8fafc;">${th('Étudiant')}${th('Démarré')}${th('Alertes')}${th('Statut')}${th('Actions surveillant')}</tr></thead>
                         <tbody>${inProgressRows}</tbody>
                     </table>
                 </div>
@@ -11603,3 +11615,75 @@ async function showExamQRCode(examId, examTitle) {
     } catch (e) { showAlert(e.serverMessage || 'Erreur lors de la génération du QR code.', 'error'); }
 }
 
+
+// ============================================================================
+// BILAN D'EXAMEN PAR ÉTUDIANT
+// ============================================================================
+
+async function showExamBilan(examId, examTitle) {
+    showLoader(true);
+    try {
+        const r = await authenticatedFetch(`/api/online_exams/${examId}/bilan`);
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Erreur');
+
+        const statusLabel = { submitted: 'Soumis', auto_submitted: 'Auto-soumis', in_progress: 'En cours', banned: 'Exclu', not_started: 'Absent' };
+        const statusColor = { submitted: '#6366f1', auto_submitted: '#8b5cf6', in_progress: '#f59e0b', banned: '#ef4444', not_started: '#94a3b8' };
+        const riskColor   = s => s >= 70 ? '#ef4444' : s >= 40 ? '#f59e0b' : '#10b981';
+        const scoreColor  = s => s === null ? '#94a3b8' : s >= 10 ? '#10b981' : '#ef4444';
+
+        const rows = (d.attempts || []).map(a => {
+            const sc   = statusColor[a.status] || '#94a3b8';
+            const sl   = statusLabel[a.status]  || a.status;
+            return `<tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:8px 10px;font-size:13px;font-weight:500;color:#0f172a">${escHtml(a.student_name)}</td>
+                <td style="padding:8px 10px;text-align:center;">
+                    <span style="background:${sc}22;color:${sc};font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;">${sl}</span>
+                </td>
+                <td style="padding:8px 10px;text-align:center;font-size:13px;font-weight:700;color:${scoreColor(a.score)};">${a.score !== null ? a.score + '/20' : '—'}</td>
+                <td style="padding:8px 10px;text-align:center;">
+                    <span style="color:${riskColor(a.risk_score)};font-size:12px;font-weight:600;">${a.risk_score}%</span>
+                </td>
+                <td style="padding:8px 10px;text-align:center;font-size:12px;color:#64748b;">${a.duration_min !== null ? a.duration_min + ' min' : '—'}</td>
+                <td style="padding:8px 10px;text-align:center;font-size:12px;color:${a.extra_minutes > 0 ? '#d97706' : '#94a3b8'};">${a.extra_minutes > 0 ? '+' + a.extra_minutes + ' min' : '—'}</td>
+                <td style="padding:8px 10px;text-align:center;font-size:12px;color:${a.note_count > 0 ? '#6366f1' : '#94a3b8'};">${a.note_count > 0 ? a.note_count + ' note(s)' : '—'}</td>
+                <td style="padding:8px 10px;text-align:center;">
+                    ${a.status === 'submitted' || a.status === 'auto_submitted' ? `<button class="btn btn-sm" onclick="viewMyExamResult(${a.attempt_id})" style="padding:3px 10px;font-size:11px;background:#ede9fe;color:#6366f1;border-radius:5px;">Voir</button>` : ''}
+                </td>
+            </tr>`;
+        }).join('');
+
+        const html = `
+        <div style="max-width:820px;">
+            <h2 style="margin:0 0 4px;font-size:17px;"><i class="fas fa-list-alt" style="color:#0369a1;margin-right:8px;"></i>Bilan — ${escHtml(d.exam_title || examTitle)}</h2>
+            <p style="color:#64748b;margin:0 0 16px;font-size:13px;">${(d.attempts||[]).length} participant(s)</p>
+            <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                        <tr style="background:#f8fafc;border-bottom:2px solid #e2e8f0;">
+                            <th style="padding:8px 10px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Étudiant</th>
+                            <th style="padding:8px 10px;text-align:center;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Statut</th>
+                            <th style="padding:8px 10px;text-align:center;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Note</th>
+                            <th style="padding:8px 10px;text-align:center;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Risque</th>
+                            <th style="padding:8px 10px;text-align:center;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Durée</th>
+                            <th style="padding:8px 10px;text-align:center;font-size:11px;color:#d97706;font-weight:700;text-transform:uppercase;">Extra</th>
+                            <th style="padding:8px 10px;text-align:center;font-size:11px;color:#6366f1;font-weight:700;text-transform:uppercase;">Notes surv.</th>
+                            <th style="padding:8px 10px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows || '<tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8;">Aucun participant</td></tr>'}</tbody>
+                </table>
+            </div>
+        </div>`;
+        showModal('', html);
+    } catch (e) {
+        showAlert(e.message || 'Impossible de charger le bilan.', 'error');
+    } finally {
+        showLoader(false);
+    }
+}
+
+function escHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
