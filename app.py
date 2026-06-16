@@ -4994,6 +4994,7 @@ def export_exam_csv(exam_id):
             download_name=filename
         )
     except Exception as e:
+        print(f"❌ export_exam_csv {exam_id}: {e}")
         try: session.close()
         except: pass
         return jsonify({'error': str(e)}), 500
@@ -5052,6 +5053,7 @@ def get_exam_stats(exam_id):
             'pre_sig_rate':     round(sum(1 for a in done if a.pre_exam_signature_data) / len(done) * 100, 1) if done else 0,
         })
     except Exception as e:
+        print(f"❌ get_exam_stats {exam_id}: {e}")
         try: session.close()
         except: pass
         return jsonify({'error': str(e)}), 500
@@ -5100,6 +5102,7 @@ def manual_grade_attempt(attempt_id):
         session.close()
         return jsonify({'success': True, 'score': score, 'message': 'Note enregistrée'})
     except Exception as e:
+        print(f"❌ manual_grade_attempt {attempt_id}: {e}")
         try: session.rollback(); session.close()
         except: pass
         return jsonify({'error': str(e)}), 500
@@ -5142,6 +5145,7 @@ def get_student_exam_history():
         session.close()
         return jsonify({'history': history, 'total': len(history)})
     except Exception as e:
+        print(f"❌ get_student_exam_history: {e}")
         try: session.close()
         except: pass
         return jsonify({'error': str(e)}), 500
@@ -5173,7 +5177,7 @@ def plagiarism_check(exam_id):
             joinedload(ExamAttempt.student)
         ).filter(
             ExamAttempt.exam_id == exam_id,
-            ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED, AttemptStatus.GRADED])
+            ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED])
         ).all()
         def extract_text(answers_raw):
             if not answers_raw:
@@ -5223,6 +5227,8 @@ def plagiarism_check(exam_id):
             'total_pairs':   len(suspicious),
         })
     except Exception as e:
+        import traceback
+        print(f"❌ Erreur plagiarism_check exam {exam_id}: {e}\n{traceback.format_exc()}")
         try: session.close()
         except: pass
         return jsonify({'error': str(e)}), 500
