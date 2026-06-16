@@ -500,155 +500,268 @@ def send_email(to_email, subject, html_body, attachments=None, text_body=None):
     return _send_direct_mx(to_email, msg2, direct_from)
 
 def send_account_created_email(user_email, user_name, role, temp_password=None):
-    """Email de création de compte"""
-    subject = "🎓 Votre compte CEI a été créé — Identifiants de connexion"
+    """Email de création de compte — SVG inline, text/plain, footer générique."""
+    smtp_cfg  = _smtp_config()
+    app_url   = smtp_cfg['app_url']
+    from_name = smtp_cfg.get('from_name', "CEI — Centre d'Examen Intelligent")
+    subject   = "Votre compte CEI a été créé — Identifiants de connexion"
 
-    smtp_cfg = _smtp_config()
-    app_url = smtp_cfg['app_url']
-
-    role_config = {
-        'student': {
-            'label': 'Étudiant',
-            'color': '#059669',
-            'bg': '#ecfdf5',
-            'border': '#a7f3d0',
-            'icon': '🎓',
-            'guide_url': f'{app_url}/guide-etudiant',
-            'guide_label': 'Guide Étudiant',
-            'description': 'Vous pouvez désormais accéder à vos examens en ligne, soumettre vos copies et consulter vos résultats.',
-        },
-        'professor': {
-            'label': 'Enseignant',
-            'color': '#2563eb',
-            'bg': '#eff6ff',
-            'border': '#bfdbfe',
-            'icon': '📚',
-            'guide_url': f'{app_url}/guide-enseignant',
-            'guide_label': 'Guide Enseignant',
-            'description': "Vous pouvez créer des examens, surveiller les sessions en temps réel, corriger les copies avec l'IA et publier les notes.",
-        },
-        'surveillant': {
-            'label': 'Surveillant',
-            'color': '#d97706',
-            'bg': '#fffbeb',
-            'border': '#fcd34d',
-            'icon': '👁️',
-            'guide_url': f'{app_url}/guide-surveillant',
-            'guide_label': 'Guide Surveillant',
-            'description': "Vous serez affecté à des examens par les enseignants. Vous surveillerez un groupe d'étudiants qui vous sera assigné et pourrez intervenir en temps réel.",
-        },
-        'admin': {
-            'label': 'Administrateur',
-            'color': '#7c3aed',
-            'bg': '#f5f3ff',
-            'border': '#c4b5fd',
-            'icon': '⚙️',
-            'guide_url': f'{app_url}/app',
-            'guide_label': "Accéder à l'interface",
-            'description': "Vous disposez d'un accès complet à la plateforme : gestion des utilisateurs, des examens et des statistiques globales.",
-        },
+    # SVG icons par rôle
+    _svg = {
+        'student': (
+            '#059669', '#ecfdf5', '#a7f3d0', 'Étudiant',
+            f'{app_url}/guide-etudiant', 'Guide Étudiant',
+            'Vous pouvez désormais accéder à vos examens en ligne, soumettre vos copies et consulter vos résultats.',
+            '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" style="display:inline-block;">'
+            '<path d="M12 3L1 9l11 6 9-4.91V17h2V9L12 3z" fill="white"/>'
+            '<path d="M5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82z" fill="rgba(255,255,255,0.75)"/>'
+            '</svg>'
+        ),
+        'professor': (
+            '#2563eb', '#eff6ff', '#bfdbfe', 'Enseignant',
+            f'{app_url}/guide-enseignant', 'Guide Enseignant',
+            "Vous pouvez créer des examens, surveiller les sessions en temps réel, corriger les copies avec l'IA et publier les notes.",
+            '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" style="display:inline-block;">'
+            '<path d="M4 19.5A2.5 2.5 0 016.5 17H20" stroke="white" stroke-width="2" stroke-linecap="round"/>'
+            '<path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" stroke="white" stroke-width="2"/>'
+            '<line x1="9" y1="7" x2="15" y2="7" stroke="white" stroke-width="1.5" stroke-linecap="round"/>'
+            '<line x1="9" y1="11" x2="15" y2="11" stroke="white" stroke-width="1.5" stroke-linecap="round"/>'
+            '</svg>'
+        ),
+        'surveillant': (
+            '#d97706', '#fffbeb', '#fcd34d', 'Surveillant',
+            f'{app_url}/guide-surveillant', 'Guide Surveillant',
+            "Vous serez affecté à des examens par les enseignants et surveillerez un groupe d'étudiants qui vous sera assigné.",
+            '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" style="display:inline-block;">'
+            '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="white" stroke-width="2"/>'
+            '<circle cx="12" cy="12" r="3" fill="white"/>'
+            '</svg>'
+        ),
+        'admin': (
+            '#7c3aed', '#f5f3ff', '#c4b5fd', 'Administrateur',
+            f'{app_url}/app', "Accéder à l'interface",
+            "Vous disposez d'un accès complet à la plateforme : gestion des utilisateurs, des examens et des statistiques globales.",
+            '<svg width="44" height="44" viewBox="0 0 24 24" fill="none" style="display:inline-block;">'
+            '<circle cx="12" cy="12" r="3" stroke="white" stroke-width="2"/>'
+            '<path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="white" stroke-width="1.5"/>'
+            '</svg>'
+        ),
     }
+    color, bg, border, label, guide_url, guide_label, desc, icon_svg = _svg.get(
+        role.lower(), _svg['student'])
 
-    cfg = role_config.get(role.lower(), role_config['student'])
+    # SVG icônes dans le corps
+    email_svg = ('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="display:inline-block;vertical-align:middle;margin-right:4px;">'
+                 '<rect x="2" y="4" width="20" height="16" rx="2" stroke="#64748b" stroke-width="2"/>'
+                 '<path d="M2 7l10 7 10-7" stroke="#64748b" stroke-width="2"/></svg>')
+    lock_svg  = ('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="display:inline-block;vertical-align:middle;margin-right:4px;">'
+                 '<rect x="5" y="11" width="14" height="10" rx="2" stroke="#64748b" stroke-width="2"/>'
+                 '<path d="M8 11V7a4 4 0 018 0v4" stroke="#64748b" stroke-width="2" stroke-linecap="round"/></svg>')
+    link_svg  = ('<svg width="13" height="13" viewBox="0 0 24 24" fill="none" style="display:inline-block;vertical-align:middle;margin-right:4px;">'
+                 '<path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'
+                 '<polyline points="15 3 21 3 21 9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'
+                 '<line x1="10" y1="14" x2="21" y2="3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>')
+    warn_svg  = ('<svg width="15" height="15" viewBox="0 0 24 24" fill="none" style="display:inline-block;vertical-align:middle;margin-right:5px;">'
+                 '<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" fill="#fde68a" stroke="#92400e" stroke-width="1.5"/>'
+                 '<line x1="12" y1="9" x2="12" y2="13" stroke="#92400e" stroke-width="2" stroke-linecap="round"/>'
+                 '<circle cx="12" cy="17" r="1" fill="#92400e"/></svg>')
 
-    html_body = f"""
-    <html>
-    <body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;background:#f8fafc;margin:0;padding:0;">
-        <div style="max-width:600px;margin:0 auto;padding:32px 16px;">
+    pwd_row = (f'<p style="margin:8px 0;font-size:14px;color:#0f172a;">{lock_svg}'
+               f'<span style="color:#64748b;">Mot de passe :</span> '
+               f'<strong style="font-family:monospace;background:#f1f5f9;padding:2px 8px;border-radius:4px;">{temp_password}</strong></p>'
+               if temp_password else '')
 
-            <!-- Header -->
-            <div style="background:linear-gradient(135deg,#1e3a8a,#2563eb);border-radius:12px 12px 0 0;padding:32px;text-align:center;">
-                <div style="font-size:48px;margin-bottom:12px;">{cfg['icon']}</div>
-                <h1 style="color:white;font-size:22px;font-weight:800;margin:0 0 8px;">Centre d'Examen Intelligent</h1>
-                <p style="color:rgba(255,255,255,.85);font-size:14px;margin:0;">Votre compte a été créé avec succès</p>
-            </div>
+    html_body = f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,Helvetica,sans-serif;background:#f8fafc;margin:0;padding:24px;">
+<div style="max-width:560px;margin:0 auto;">
 
-            <!-- Body -->
-            <div style="background:white;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 12px 12px;padding:32px;">
+  <!-- En-tête -->
+  <div style="background:linear-gradient(135deg,#1e3a8a 0%,#2563eb 100%);border-radius:14px 14px 0 0;padding:36px;text-align:center;">
+    <div style="margin-bottom:14px;">{icon_svg}</div>
+    <h1 style="color:#fff;font-size:22px;font-weight:800;margin:0 0 6px;">Centre d'Examen Intelligent</h1>
+    <p style="color:rgba(255,255,255,.85);font-size:14px;margin:0;">Votre compte a été créé avec succès</p>
+  </div>
 
-                <!-- Role badge -->
-                <div style="display:inline-block;background:{cfg['bg']};border:1px solid {cfg['border']};color:{cfg['color']};padding:6px 16px;border-radius:99px;font-size:13px;font-weight:700;margin-bottom:20px;">
-                    {cfg['icon']} Rôle : {cfg['label']}
-                </div>
+  <!-- Corps -->
+  <div style="background:#fff;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 14px 14px;padding:36px;">
 
-                <p style="font-size:16px;color:#0f172a;margin:0 0 12px;">Bonjour <strong>{user_name}</strong>,</p>
-                <p style="font-size:14px;color:#475569;margin:0 0 24px;">{cfg['description']}</p>
+    <!-- Badge rôle -->
+    <div style="display:inline-block;background:{bg};border:1px solid {border};color:{color};padding:6px 18px;border-radius:99px;font-size:13px;font-weight:700;margin-bottom:22px;">
+      Rôle : {label}
+    </div>
 
-                <!-- Credentials box -->
-                <div style="background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid {cfg['color']};border-radius:8px;padding:20px;margin-bottom:24px;">
-                    <p style="font-size:13px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin:0 0 14px;">Vos identifiants de connexion</p>
-                    <p style="margin:6px 0;font-size:14px;color:#0f172a;"><span style="color:#64748b;">📧 Email :</span> <strong>{user_email}</strong></p>
-                    {f'<p style="margin:6px 0;font-size:14px;color:#0f172a;"><span style="color:#64748b;">🔒 Mot de passe :</span> <strong style="font-family:monospace;background:#f1f5f9;padding:2px 8px;border-radius:4px;">{temp_password}</strong></p>' if temp_password else ''}
-                </div>
+    <p style="font-size:16px;color:#0f172a;margin:0 0 10px;">Bonjour <strong>{user_name}</strong>,</p>
+    <p style="font-size:14px;color:#475569;line-height:1.7;margin:0 0 26px;">{desc}</p>
 
-                <!-- CTA buttons -->
-                <div style="text-align:center;margin-bottom:24px;">
-                    <a href="{app_url}/app"
-                       style="display:inline-block;padding:13px 28px;background:{cfg['color']};color:white;text-decoration:none;border-radius:8px;font-size:15px;font-weight:700;margin-bottom:12px;">
-                        Se connecter à la plateforme
-                    </a>
-                    <br>
-                    <a href="{cfg['guide_url']}"
-                       style="display:inline-block;margin-top:8px;font-size:13px;color:{cfg['color']};text-decoration:underline;">
-                        📖 Consulter le {cfg['guide_label']}
-                    </a>
-                </div>
+    <!-- Identifiants -->
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid {color};border-radius:8px;padding:20px;margin-bottom:26px;">
+      <p style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin:0 0 14px;">Vos identifiants de connexion</p>
+      <p style="margin:8px 0;font-size:14px;color:#0f172a;">{email_svg}<span style="color:#64748b;">Email :</span> <strong>{user_email}</strong></p>
+      {pwd_row}
+    </div>
 
-                <!-- Security note -->
-                <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:14px 16px;font-size:12px;color:#92400e;">
-                    ⚠️ Pour votre sécurité, changez votre mot de passe dès votre première connexion via les paramètres de votre profil.
-                </div>
+    <!-- Bouton connexion -->
+    <div style="text-align:center;margin-bottom:20px;">
+      <a href="{app_url}/app"
+         style="display:inline-block;padding:13px 30px;background:{color};color:#fff;text-decoration:none;border-radius:9px;font-size:15px;font-weight:700;">
+        Se connecter à la plateforme
+      </a>
+    </div>
 
-                <p style="color:#94a3b8;font-size:11px;margin-top:24px;text-align:center;line-height:1.7;">
-                    © 2026 CEI — RTN – Réseaux et Techniques Numériques<br>
-                    Liberté 2, derrière immeuble BICIS, Jet d'eau – Dakar – Sénégal<br>
-                    (+221) 77 662 76 94 &nbsp;·&nbsp;
-                    <a href="mailto:entreprisertn221@gmail.com" style="color:#94a3b8;">entreprisertn221@gmail.com</a>
-                </p>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
+    <!-- Lien guide -->
+    <p style="text-align:center;margin:0 0 26px;">
+      <a href="{guide_url}" style="font-size:13px;color:{color};text-decoration:underline;">
+        {link_svg}Consulter le {guide_label}
+      </a>
+    </p>
 
-    return send_email(user_email, subject, html_body)
+    <!-- Note sécurité -->
+    <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:14px 16px;">
+      <p style="margin:0;font-size:13px;color:#92400e;line-height:1.7;">
+        {warn_svg}<strong>Sécurité :</strong> changez votre mot de passe dès votre première connexion
+        via les paramètres de votre profil.
+      </p>
+    </div>
+  </div>
+
+  <!-- Pied de page -->
+  <div style="text-align:center;padding:18px 0 0;">
+    <p style="margin:0;font-size:12px;color:#94a3b8;">
+      {from_name} &nbsp;·&nbsp; <a href="{app_url}" style="color:#94a3b8;">{app_url}</a>
+    </p>
+  </div>
+
+</div>
+</body></html>"""
+
+    text_body = f"""Votre compte CEI a été créé
+===========================
+
+Bonjour {user_name},
+
+Rôle : {label}
+{desc}
+
+Vos identifiants de connexion :
+  Email       : {user_email}
+{"  Mot de passe : " + temp_password if temp_password else ""}
+
+Se connecter : {app_url}/app
+Guide         : {guide_url}
+
+IMPORTANT : changez votre mot de passe dès votre première connexion.
+
+---
+{from_name}
+{app_url}
+"""
+    return send_email(user_email, subject, html_body, text_body=text_body)
 
 def send_paper_corrected_email(student_email, student_name, subject_title, score, paper_id, attachments=None):
-    """Email de copie corrigée - Amélioré : Avec attachments"""
-    subject = f"✅ Votre copie ({subject_title}) a été corrigée"
+    """Email de copie corrigée — SVG inline, text/plain, footer générique."""
+    smtp_cfg  = _smtp_config()
+    app_url   = smtp_cfg['app_url']
+    from_name = smtp_cfg.get('from_name', "CEI — Centre d'Examen Intelligent")
+    subject   = f"Votre copie ({subject_title}) a été corrigée"
 
-    app_url = _smtp_config()['app_url']
-    score_color = "#10b981" if score >= 10 else "#ef4444"
+    score_color  = '#16a34a' if score >= 10 else '#dc2626'
+    score_bg     = '#f0fdf4' if score >= 10 else '#fef2f2'
+    score_border = '#bbf7d0' if score >= 10 else '#fecaca'
+    mention      = 'Admis(e)' if score >= 10 else 'Insuffisant'
 
-    html_body = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-        <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
-            <h2 style="color: #2563eb;">📝 Copie Corrigée</h2>
-            <p>Bonjour <strong>{student_name}</strong>,</p>
-            <p>Votre copie pour le sujet <strong>{subject_title}</strong> a été corrigée.</p>
+    # SVG icône document corrigé
+    doc_svg = (
+        '<svg width="52" height="52" viewBox="0 0 24 24" fill="none" '
+        'xmlns="http://www.w3.org/2000/svg" style="display:inline-block;">'
+        '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" '
+        'stroke="white" stroke-width="2" stroke-linecap="round"/>'
+        '<polyline points="14 2 14 8 20 8" stroke="white" stroke-width="2" stroke-linecap="round"/>'
+        '<line x1="9" y1="13" x2="15" y2="13" stroke="white" stroke-width="2" stroke-linecap="round"/>'
+        '<line x1="9" y1="17" x2="13" y2="17" stroke="white" stroke-width="2" stroke-linecap="round"/>'
+        '<polyline points="9 9 10 10 12 7" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+        '</svg>'
+    )
+    # SVG icône info (délai reclamation)
+    info_svg = (
+        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" '
+        'style="display:inline-block;vertical-align:middle;margin-right:5px;">'
+        '<circle cx="12" cy="12" r="10" stroke="#3b82f6" stroke-width="2"/>'
+        '<line x1="12" y1="8" x2="12" y2="12" stroke="#3b82f6" stroke-width="2" stroke-linecap="round"/>'
+        '<circle cx="12" cy="16" r="1" fill="#3b82f6"/>'
+        '</svg>'
+    )
 
-            <div style="background: #f8fafc; padding: 20px; border-radius: 6px; margin: 20px 0; text-align: center;">
-                <p style="font-size: 18px; margin: 0;">Votre note:</p>
-                <p style="font-size: 36px; font-weight: bold; color: {score_color}; margin: 10px 0;">{score}/20</p>
-            </div>
+    html_body = f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,Helvetica,sans-serif;background:#f8fafc;margin:0;padding:24px;">
+<div style="max-width:520px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
 
-            <p>Vous pouvez consulter le détail dans l'application. Si vous souhaitez contester, vous avez 7 jours à compter de la correction.</p>
+  <!-- En-tête -->
+  <div style="background:linear-gradient(135deg,#1d4ed8 0%,#2563eb 100%);padding:36px;text-align:center;">
+    <div style="margin-bottom:14px;">{doc_svg}</div>
+    <h1 style="color:#fff;font-size:21px;font-weight:800;margin:0 0 6px;">Copie corrigée</h1>
+    <p style="color:rgba(255,255,255,.85);font-size:14px;margin:0;">{subject_title}</p>
+  </div>
 
-            <p><a href="{app_url}/app" style="display: inline-block; padding: 12px 24px; background: #2563eb; color: white; text-decoration: none; border-radius: 6px;">Voir ma copie</a></p>
+  <!-- Corps -->
+  <div style="padding:36px;">
+    <p style="font-size:15px;color:#0f172a;margin:0 0 22px;">Bonjour <strong>{student_name}</strong>,</p>
+    <p style="font-size:14px;color:#475569;line-height:1.7;margin:0 0 28px;">
+      Votre copie pour le sujet <strong>{subject_title}</strong> vient d'être corrigée.
+      Voici votre résultat :
+    </p>
 
-            <p style="color:#94a3b8;font-size:11px;margin-top:30px;text-align:center;line-height:1.7;">
-                © 2026 CEI — RTN – Réseaux et Techniques Numériques<br>
-                Liberté 2, derrière immeuble BICIS, Jet d'eau – Dakar – Sénégal<br>
-                (+221) 77 662 76 94 &nbsp;·&nbsp;
-                <a href="mailto:entreprisertn221@gmail.com" style="color:#94a3b8;">entreprisertn221@gmail.com</a>
-            </p>
-        </div>
-    </body>
-    </html>
-    """
+    <!-- Score -->
+    <div style="background:{score_bg};border:2px solid {score_border};border-radius:12px;padding:28px;text-align:center;margin-bottom:28px;">
+      <p style="font-size:13px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px;">Votre note</p>
+      <p style="font-size:52px;font-weight:900;color:{score_color};margin:0;line-height:1;">{score}<span style="font-size:26px;font-weight:600;">/20</span></p>
+      <p style="font-size:14px;font-weight:700;color:{score_color};margin:10px 0 0;">{mention}</p>
+    </div>
 
-    return send_email(student_email, subject, html_body, attachments)
+    <!-- CTA -->
+    <div style="text-align:center;margin-bottom:26px;">
+      <a href="{app_url}/app"
+         style="display:inline-block;padding:13px 32px;background:#2563eb;color:#fff;text-decoration:none;border-radius:9px;font-size:15px;font-weight:700;">
+        Consulter le détail de ma copie
+      </a>
+    </div>
+
+    <!-- Info réclamation -->
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:14px 16px;">
+      <p style="margin:0;font-size:13px;color:#1e40af;line-height:1.7;">
+        {info_svg}<strong>Délai de réclamation :</strong> vous avez <strong>7 jours</strong>
+        à compter de la correction pour contester votre note via l'application.
+      </p>
+    </div>
+  </div>
+
+  <!-- Pied de page -->
+  <div style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:16px 36px;text-align:center;">
+    <p style="margin:0;font-size:12px;color:#94a3b8;">
+      {from_name} &nbsp;·&nbsp; <a href="{app_url}" style="color:#94a3b8;">{app_url}</a>
+    </p>
+  </div>
+
+</div>
+</body></html>"""
+
+    text_body = f"""Votre copie ({subject_title}) a été corrigée
+{"=" * (len(subject_title) + 30)}
+
+Bonjour {student_name},
+
+Votre note : {score}/20 — {mention}
+
+Consultez le détail de votre copie : {app_url}/app
+
+Vous avez 7 jours pour déposer une réclamation via l'application.
+
+---
+{from_name}
+{app_url}
+"""
+    return send_email(student_email, subject, html_body, attachments, text_body=text_body)
 
 # ============================================================================
 # VALIDATION DE FICHIERS
@@ -807,6 +920,178 @@ def find_or_create_student(student_name, extracted_name, session):
     print(f"Associez-le à un compte réel via l'interface admin")
 
     return student
+
+
+def send_exam_started_email(student_email, student_name, exam_title, exam_url, end_time_str):
+    """Email aux étudiants quand un examen en ligne est activé."""
+    smtp_cfg  = _smtp_config()
+    app_url   = smtp_cfg.get('app_url', 'https://cei.ec2lt.sn')
+    from_name = smtp_cfg.get('from_name', "CEI — Centre d'Examen Intelligent")
+    subject   = f"Examen disponible : {exam_title}"
+
+    bell_svg = (
+        '<svg width="52" height="52" viewBox="0 0 24 24" fill="none" '
+        'xmlns="http://www.w3.org/2000/svg" style="display:inline-block;">'
+        '<path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" '
+        'stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+        '<path d="M13.73 21a2 2 0 01-3.46 0" '
+        'stroke="white" stroke-width="2" stroke-linecap="round"/>'
+        '<circle cx="18" cy="6" r="4" fill="#fbbf24"/>'
+        '</svg>'
+    )
+    warn_svg = (
+        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" '
+        'style="display:inline-block;vertical-align:middle;margin-right:5px;">'
+        '<circle cx="12" cy="12" r="10" stroke="#d97706" stroke-width="2"/>'
+        '<line x1="12" y1="8" x2="12" y2="12" stroke="#d97706" stroke-width="2" stroke-linecap="round"/>'
+        '<circle cx="12" cy="16" r="1" fill="#d97706"/>'
+        '</svg>'
+    )
+
+    html_body = f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,Helvetica,sans-serif;background:#f8fafc;margin:0;padding:24px;">
+<div style="max-width:520px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+  <div style="background:linear-gradient(135deg,#7c3aed 0%,#4f46e5 100%);padding:36px;text-align:center;">
+    <div style="margin-bottom:14px;">{bell_svg}</div>
+    <h1 style="color:#fff;font-size:21px;font-weight:800;margin:0 0 6px;">Examen disponible !</h1>
+    <p style="color:rgba(255,255,255,.85);font-size:14px;margin:0;">{exam_title}</p>
+  </div>
+
+  <div style="padding:36px;">
+    <p style="font-size:15px;color:#0f172a;margin:0 0 16px;">Bonjour <strong>{student_name}</strong>,</p>
+    <p style="font-size:14px;color:#475569;line-height:1.7;margin:0 0 26px;">
+      Votre examen <strong>{exam_title}</strong> est maintenant disponible sur la plateforme CEI.
+      Connectez-vous dès que possible pour le commencer.
+    </p>
+
+    <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:14px 16px;margin-bottom:26px;">
+      <p style="margin:0;font-size:13px;color:#92400e;line-height:1.7;">
+        {warn_svg}<strong>Date de clôture :</strong> {end_time_str}<br>
+        Passé ce délai, l'examen ne sera plus accessible.
+      </p>
+    </div>
+
+    <div style="text-align:center;">
+      <a href="{exam_url}"
+         style="display:inline-block;padding:14px 36px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:9px;font-size:15px;font-weight:700;">
+        Accéder à l'examen maintenant
+      </a>
+    </div>
+  </div>
+
+  <div style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:16px 36px;text-align:center;">
+    <p style="margin:0;font-size:12px;color:#94a3b8;">
+      {from_name} &nbsp;·&nbsp; <a href="{app_url}" style="color:#94a3b8;">{app_url}</a>
+    </p>
+  </div>
+</div>
+</body></html>"""
+
+    text_body = f"""Examen disponible : {exam_title}
+{"=" * (len(exam_title) + 20)}
+
+Bonjour {student_name},
+
+Votre examen "{exam_title}" est maintenant disponible sur la plateforme CEI.
+
+Date de clôture : {end_time_str}
+
+Accéder à l'examen : {exam_url}
+
+---
+{from_name}
+{app_url}
+"""
+    return send_email(student_email, subject, html_body, text_body=text_body)
+
+
+def send_password_changed_email(user_email, user_name, reset_url):
+    """Email de sécurité envoyé après un changement de mot de passe réussi."""
+    smtp_cfg  = _smtp_config()
+    app_url   = smtp_cfg.get('app_url', 'https://cei.ec2lt.sn')
+    from_name = smtp_cfg.get('from_name', "CEI — Centre d'Examen Intelligent")
+    subject   = "Votre mot de passe CEI a été modifié"
+
+    shield_svg = (
+        '<svg width="52" height="52" viewBox="0 0 24 24" fill="none" '
+        'xmlns="http://www.w3.org/2000/svg" style="display:inline-block;">'
+        '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" fill="rgba(255,255,255,0.2)" '
+        'stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'
+        '<polyline points="9 12 11 14 15 10" stroke="white" stroke-width="2.5" '
+        'stroke-linecap="round" stroke-linejoin="round"/>'
+        '</svg>'
+    )
+    warn_svg = (
+        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" '
+        'style="display:inline-block;vertical-align:middle;margin-right:5px;">'
+        '<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" '
+        'fill="#fde68a" stroke="#92400e" stroke-width="1.5"/>'
+        '<line x1="12" y1="9" x2="12" y2="13" stroke="#92400e" stroke-width="2" stroke-linecap="round"/>'
+        '<circle cx="12" cy="17" r="1" fill="#92400e"/>'
+        '</svg>'
+    )
+
+    html_body = f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,Helvetica,sans-serif;background:#f8fafc;margin:0;padding:24px;">
+<div style="max-width:520px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+  <div style="background:linear-gradient(135deg,#059669 0%,#047857 100%);padding:36px;text-align:center;">
+    <div style="margin-bottom:14px;">{shield_svg}</div>
+    <h1 style="color:#fff;font-size:21px;font-weight:800;margin:0 0 6px;">Mot de passe modifié</h1>
+    <p style="color:rgba(255,255,255,.85);font-size:14px;margin:0;">Confirmation de sécurité</p>
+  </div>
+
+  <div style="padding:36px;">
+    <p style="font-size:15px;color:#0f172a;margin:0 0 16px;">Bonjour <strong>{user_name}</strong>,</p>
+    <p style="font-size:14px;color:#475569;line-height:1.7;margin:0 0 26px;">
+      Le mot de passe de votre compte CEI vient d'être <strong>modifié avec succès</strong>.
+      Si vous êtes à l'origine de ce changement, vous n'avez rien à faire.
+    </p>
+
+    <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:16px;margin-bottom:26px;">
+      <p style="margin:0;font-size:13px;color:#92400e;line-height:1.7;">
+        {warn_svg}<strong>Ce n'était pas vous ?</strong><br>
+        Réinitialisez immédiatement votre mot de passe en cliquant sur le bouton ci-dessous
+        et contactez l'administrateur de la plateforme.
+      </p>
+    </div>
+
+    <div style="text-align:center;">
+      <a href="{reset_url}"
+         style="display:inline-block;padding:13px 30px;background:#dc2626;color:#fff;text-decoration:none;border-radius:9px;font-size:14px;font-weight:700;">
+        Ce n'était pas moi — Sécuriser mon compte
+      </a>
+    </div>
+  </div>
+
+  <div style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:16px 36px;text-align:center;">
+    <p style="margin:0;font-size:12px;color:#94a3b8;">
+      {from_name} &nbsp;·&nbsp; <a href="{app_url}" style="color:#94a3b8;">{app_url}</a>
+    </p>
+  </div>
+</div>
+</body></html>"""
+
+    text_body = f"""Mot de passe CEI modifié — Confirmation de sécurité
+====================================================
+
+Bonjour {user_name},
+
+Le mot de passe de votre compte CEI vient d'être modifié.
+
+Si vous êtes à l'origine de ce changement : aucune action requise.
+
+Ce n'était pas vous ? Réinitialisez votre mot de passe immédiatement :
+{reset_url}
+
+---
+{from_name}
+{app_url}
+"""
+    return send_email(user_email, subject, html_body, text_body=text_body)
 
 
 def send_password_reset_email(user_email, user_name, reset_link):

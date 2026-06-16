@@ -208,6 +208,7 @@ class User(Base):
     has_email = Column(Boolean, default=True)
     reset_token = Column(String(64), nullable=True)
     reset_token_expires = Column(DateTime, nullable=True)
+    notifications_last_read = Column(DateTime, nullable=True)
 
     created_subjects = relationship('Subject', foreign_keys='Subject.creator_id', back_populates='creator')
     student_papers = relationship('StudentPaper', foreign_keys='StudentPaper.student_id', back_populates='student')

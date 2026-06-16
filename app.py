@@ -41,7 +41,8 @@ from models import (
 from export_route import register_export_route
 from utils import (
     send_account_created_email, send_paper_corrected_email,
-    send_password_reset_email,
+    send_password_reset_email, send_password_changed_email,
+    send_exam_started_email,
     extract_text_from_file,
     generate_pdf_report,
     generate_corrected_paper_pdf,
@@ -635,10 +636,18 @@ def change_password():
 
         user.password_hash = bcrypt.generate_password_hash(new_pw).decode('utf-8')
         session.commit()
+        # Email de sécurité (asynchrone — pas bloquant)
+        app_url   = os.getenv('APP_URL', 'https://cei.ec2lt.sn').rstrip('/')
+        reset_url = f"{app_url}/app?action=forgot"
+        try:
+            if user.email:
+                send_password_changed_email(user.email, user.full_name, reset_url)
+        except Exception:
+            pass
         session.close()
         return jsonify({'success': True, 'message': 'Mot de passe modifié avec succès'})
     except Exception as e:
-        print(f"❌ Erreur change_password: {e}")
+        print(f"Erreur change_password: {e}")
         return jsonify({'error': str(e)}), 500
 
 # ============================================================================
@@ -718,14 +727,23 @@ def reset_password():
             session.close()
             return jsonify({'error': 'Ce lien a expiré. Faites une nouvelle demande.'}), 400
 
+        saved_email = user.email
+        saved_name  = user.full_name
         user.password_hash = bcrypt.generate_password_hash(new_password).decode('utf-8')
         user.reset_token = None
         user.reset_token_expires = None
         session.commit()
+        app_url   = os.getenv('APP_URL', 'https://cei.ec2lt.sn').rstrip('/')
+        reset_url = f"{app_url}/app?action=forgot"
+        try:
+            if saved_email:
+                send_password_changed_email(saved_email, saved_name, reset_url)
+        except Exception:
+            pass
         session.close()
         return jsonify({'success': True, 'message': 'Mot de passe mis à jour avec succès.'})
     except Exception as e:
-        print(f"❌ Erreur reset_password: {e}")
+        print(f"Erreur reset_password: {e}")
         return jsonify({'error': str(e)}), 500
 
 # ============================================================================
@@ -3515,11 +3533,31 @@ def activate_online_exam(exam_id):
         session.commit()
         
         exam_dict = exam.to_dict()
+
+        # Notifier par email tous les étudiants inscrits à la formation de l'examen
+        try:
+            app_url  = os.getenv('APP_URL', 'https://cei.ec2lt.sn').rstrip('/')
+            exam_url = f"{app_url}/app"
+            end_str  = exam.end_time.strftime('%d/%m/%Y à %H:%M') if exam.end_time else 'voir sur la plateforme'
+            from models import StudentUEEnrollment, EC as ECModel, UE as UEModel
+            # Récupérer les EC liés à cet examen
+            ec = session.query(ECModel).filter_by(id=exam.ec_id).first() if hasattr(exam, 'ec_id') and exam.ec_id else None
+            if ec and ec.ue:
+                enrollments = session.query(StudentUEEnrollment).filter_by(ue_id=ec.ue_id).all()
+                for enr in enrollments:
+                    student = enr.student
+                    if student and student.email and student.is_active:
+                        try:
+                            send_exam_started_email(student.email, student.full_name, exam.title, exam_url, end_str)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
         session.close()
-        
         return jsonify({'success': True, 'exam': exam_dict})
     except Exception as e:
-        print(f"❌ Erreur activate_online_exam: {e}")
+        print(f"Erreur activate_online_exam: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/online_exams/<int:exam_id>/extend', methods=['POST'])
@@ -4427,6 +4465,99 @@ def export_transcript_pdf(transcript_id):
         return send_file(pdf_path, as_attachment=True, download_name=f"releve_notes_{transcript.student.full_name}.pdf")
     except Exception as e:
         print(f"Erreur export_transcript_pdf: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/transcripts/bulk-pdf', methods=['GET'])
+@jwt_required()
+def export_transcripts_bulk_pdf():
+    """Exporter tous les relevés d'un semestre en ZIP (admin/professeur uniquement)"""
+    import zipfile
+    import io
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+
+        user = session.query(User).filter_by(id=user_id).first()
+        if user.role == UserRole.STUDENT:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+
+        semester_id = request.args.get('semester_id', type=int)
+        if not semester_id:
+            session.close()
+            return jsonify({'error': 'semester_id requis'}), 400
+
+        transcripts = session.query(GradeTranscript).filter_by(semester_id=semester_id).all()
+        if not transcripts:
+            session.close()
+            return jsonify({'error': 'Aucun relevé trouvé pour ce semestre'}), 404
+
+        from utils import generate_transcript_pdf
+
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for transcript in transcripts:
+                papers = session.query(StudentPaper).join(Subject).join(EC).join(UE).filter(
+                    StudentPaper.student_id == transcript.student_id,
+                    UE.semester_id == transcript.semester_id,
+                    StudentPaper.score != None
+                ).all()
+
+                online_attempts = session.query(ExamAttempt).join(
+                    OnlineExam, ExamAttempt.exam_id == OnlineExam.id
+                ).join(
+                    Subject, OnlineExam.subject_id == Subject.id
+                ).join(EC).join(UE).filter(
+                    ExamAttempt.student_id == transcript.student_id,
+                    UE.semester_id == transcript.semester_id,
+                    ExamAttempt.score != None
+                ).all()
+
+                notes_list = [{
+                    'ec_code': p.subject.ec.code if p.subject.ec else 'N/A',
+                    'ec_name': p.subject.ec.name if p.subject.ec else p.subject.title,
+                    'score': p.score,
+                    'coefficient': p.subject.ec.coefficient if p.subject.ec else 1
+                } for p in papers]
+
+                for attempt in online_attempts:
+                    ec = attempt.exam.subject.ec if attempt.exam and attempt.exam.subject else None
+                    notes_list.append({
+                        'ec_code': ec.code if ec else 'N/A',
+                        'ec_name': ec.name if ec else (attempt.exam.subject.title if attempt.exam and attempt.exam.subject else 'N/A'),
+                        'score': attempt.score,
+                        'coefficient': ec.coefficient if ec else 1
+                    })
+
+                transcript_data = {
+                    'student_name': transcript.student.full_name,
+                    'student_email': transcript.student.email,
+                    'semester_name': transcript.semester.name,
+                    'formation_name': transcript.semester.formation.name if transcript.semester.formation else 'N/A',
+                    'gpa': transcript.gpa,
+                    'total_credits': transcript.total_credits,
+                    'obtained_credits': transcript.obtained_credits,
+                    'papers': notes_list,
+                    'generated_at': transcript.generated_at.strftime('%d/%m/%Y')
+                }
+
+                safe_name = transcript.student.full_name.replace(' ', '_').replace('/', '-')
+                pdf_path = f"exports/releve_{transcript.id}.pdf"
+                generate_transcript_pdf(transcript_data, pdf_path)
+                zf.write(pdf_path, arcname=f"releve_{safe_name}.pdf")
+
+        session.close()
+        zip_buffer.seek(0)
+
+        semester_label = transcripts[0].semester.name.replace(' ', '_').replace('/', '-') if transcripts else str(semester_id)
+        return send_file(
+            zip_buffer,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=f"releves_{semester_label}.zip"
+        )
+    except Exception as e:
+        print(f"Erreur export_transcripts_bulk_pdf: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/transcripts/<int:transcript_id>', methods=['DELETE'])
@@ -5533,14 +5664,53 @@ def get_notifications():
                 'paper_id': p.id
             })
 
-        # Sort by most recent
-        notifications.sort(key=lambda x: x['corrected_at'] or '', reverse=True)
+        # Seuil "lu" stocké en base
+        last_read = user.notifications_last_read
+        if last_read and last_read.tzinfo is None:
+            last_read = last_read.replace(tzinfo=timezone.utc)
 
-        return jsonify({'notifications': notifications, 'count': len(notifications)})
+        def _is_read(iso_str):
+            if not last_read or not iso_str:
+                return False
+            try:
+                dt = datetime.fromisoformat(iso_str)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt <= last_read
+            except Exception:
+                return False
+
+        for n in notifications:
+            n['is_read'] = _is_read(n.get('corrected_at'))
+
+        notifications.sort(key=lambda x: x['corrected_at'] or '', reverse=True)
+        unread_count = sum(1 for n in notifications if not n['is_read'])
+
+        return jsonify({'notifications': notifications, 'count': len(notifications), 'unread_count': unread_count})
 
     except Exception as e:
         session.rollback()
-        return jsonify({'notifications': [], 'count': 0, 'error': str(e)}), 500
+        return jsonify({'notifications': [], 'count': 0, 'unread_count': 0, 'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/notifications/mark-read', methods=['PUT'])
+@jwt_required()
+def mark_notifications_read():
+    """Marquer toutes les notifications comme lues (persiste en base)."""
+    user_id = int(get_jwt_identity())
+    session = Session()
+    try:
+        user = session.query(User).get(user_id)
+        if not user:
+            return jsonify({'error': 'Utilisateur introuvable'}), 404
+        user.notifications_last_read = utcnow()
+        session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
     finally:
         session.close()
 

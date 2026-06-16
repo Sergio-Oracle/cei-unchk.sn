@@ -551,10 +551,9 @@ function renderNotifBadge() {
     const badge   = document.getElementById('notif-badge');
     if (!wrapper) return;
     wrapper.style.display = 'flex';
-    const read = _getReadSet();
-    const unseen = _notifData.filter(n => !read.has(n.id));
-    if (unseen.length > 0) {
-        badge.textContent = unseen.length > 9 ? '9+' : unseen.length;
+    const unread = _notifData.filter(n => !n.is_read);
+    if (unread.length > 0) {
+        badge.textContent = unread.length > 9 ? '9+' : unread.length;
         badge.style.display = 'flex';
     } else {
         badge.style.display = 'none';
@@ -564,7 +563,6 @@ function renderNotifBadge() {
 function renderNotifList() {
     const list = document.getElementById('notif-list');
     if (!list) return;
-    const read = _getReadSet();
     if (_notifData.length === 0) {
         list.innerHTML = '<div class="notif-empty"><i class="fas fa-check-circle" style="color:#10b981;margin-right:6px;"></i>Aucune notification</div>';
         return;
@@ -575,8 +573,7 @@ function renderNotifList() {
         return d.toLocaleDateString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
     };
     list.innerHTML = _notifData.map(n => {
-        const unread = !read.has(n.id);
-        return `<div class="notif-item${unread ? ' unread' : ''}" onclick="handleNotifClick('${n.id}','${n.type}',${n.attempt_id || n.paper_id || 0})">
+        return `<div class="notif-item${!n.is_read ? ' unread' : ''}" onclick="handleNotifClick('${n.id}','${n.type}',${n.attempt_id || n.paper_id || 0})">
             <div class="notif-title"><i class="fas fa-${n.type === 'online_exam' ? 'laptop' : 'file-alt'}" style="color:#6366f1;margin-right:6px;"></i>${n.title}</div>
             <div class="notif-msg">${n.message}</div>
             <div class="notif-time">${fmtDate(n.corrected_at)}</div>
@@ -598,19 +595,17 @@ function closeNotifPanel() {
     if (panel) panel.style.display = 'none';
 }
 
-function markAllNotifsRead(e) {
+async function markAllNotifsRead(e) {
     if (e) e.stopPropagation();
-    const read = _getReadSet();
-    _notifData.forEach(n => read.add(n.id));
-    _saveReadSet(read);
+    // Persiste en base de données
+    try { await apiCall('/api/notifications/mark-read', { method: 'PUT' }); } catch (_) {}
+    // Mise à jour locale immédiate
+    _notifData.forEach(n => { n.is_read = true; });
     renderNotifBadge();
     renderNotifList();
 }
 
 function handleNotifClick(id, type, resourceId) {
-    const read = _getReadSet();
-    read.add(id);
-    _saveReadSet(read);
     renderNotifBadge();
     closeNotifPanel();
     if (type === 'online_exam' && resourceId) {
@@ -7598,6 +7593,25 @@ async function loadAllTranscripts() {
 
     let semestersOptions = '<option value="">-- D\'abord sélectionner un étudiant --</option>';
 
+    // Build unique semesters list for bulk ZIP selector
+    const semesterMap = {};
+    existingTranscripts.forEach(tr => {
+        if (tr.semester_id && !semesterMap[tr.semester_id]) {
+            semesterMap[tr.semester_id] = tr.semester_name || `Semestre ${tr.semester_id}`;
+        }
+    });
+    const semesterEntries = Object.entries(semesterMap);
+
+    const bulkBtn = semesterEntries.length > 0 ? `
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <select id="bulk-semester-select" style="padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;background:#fff;">
+                ${semesterEntries.map(([id, name]) => `<option value="${id}">${name}</option>`).join('')}
+            </select>
+            <button class="btn btn-sm btn-success" onclick="downloadBulkTranscripts()" title="Télécharger tous les relevés du semestre en ZIP">
+                <i class="fas fa-file-archive"></i> Télécharger tout (ZIP)
+            </button>
+        </div>` : '';
+
     let html = `
         <div class="page-header">
             <h2><i class="fas fa-file-alt"></i> Relevés de Notes</h2>
@@ -7606,8 +7620,9 @@ async function loadAllTranscripts() {
 
         <!-- SECTION : Relevés Existants -->
         <div class="card" style="margin-bottom: 24px;">
-            <div class="card-header">
-                <h3><i class="fas fa-list"></i> Relevés Générés (${existingTranscripts.length})</h3>
+            <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+                <h3 style="margin:0;"><i class="fas fa-list"></i> Relevés Générés (${existingTranscripts.length})</h3>
+                ${bulkBtn}
             </div>
     `;
 
@@ -9098,6 +9113,40 @@ async function downloadTranscriptPDF(transcriptId) {
                 </div>
             </div>
         `);
+    } finally {
+        showLoader(false);
+    }
+}
+
+async function downloadBulkTranscripts() {
+    const select = document.getElementById('bulk-semester-select');
+    if (!select) return;
+    const semesterId = select.value;
+    const semesterName = select.options[select.selectedIndex]?.text || semesterId;
+    if (!semesterId) { showAlert('Veuillez sélectionner un semestre.', 'warning'); return; }
+
+    showLoader(true);
+    try {
+        const response = await fetch(`/api/transcripts/bulk-pdf?semester_id=${semesterId}`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (response.ok) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `releves_${semesterName.replace(/\s+/g,'_')}.zip`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            showAlert(`ZIP téléchargé — relevés du semestre ${semesterName}`, 'success');
+        } else {
+            const data = await response.json().catch(() => ({}));
+            showAlert(data.error || `Erreur ${response.status} lors de la génération du ZIP.`, 'danger');
+        }
+    } catch (err) {
+        showAlert('Impossible de contacter le serveur. Vérifiez votre connexion.', 'danger');
     } finally {
         showLoader(false);
     }
