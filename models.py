@@ -493,7 +493,9 @@ class ExamAttempt(Base):
     risk_score = Column(Integer, default=0)  # Score de risque 0-100
     current_egress_id = Column(String(255))  # LiveKit Egress ID actif (null si pas d'enregistrement)
 
-    # Signature électronique de l'étudiant (base64 PNG)
+    # Signature pré-examen (attestation d'honneur signée avant le timer)
+    pre_exam_signature_data = Column(Text)
+    # Signature post-examen (confirmation lors de la soumission manuelle)
     signature_data = Column(Text)
 
     # Réponses (JSON ou texte selon format)

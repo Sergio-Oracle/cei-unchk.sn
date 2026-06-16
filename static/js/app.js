@@ -6814,14 +6814,15 @@ async function startOnlineExam(examId) {
     showProctoringConsentModal(examId);
 }
 
-async function _doStartOnlineExam(examId) {
+async function _doStartOnlineExam(examId, preExamSignature = null) {
     showLoader(true);
 
     try {
         // Utiliser fetch directement pour contrôler finement chaque code d'erreur
         const headers = { 'Content-Type': 'application/json' };
         if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-        const response = await fetch(`/api/online_exams/${examId}/start`, { method: 'POST', headers });
+        const body = preExamSignature ? JSON.stringify({ pre_exam_signature: preExamSignature }) : undefined;
+        const response = await fetch(`/api/online_exams/${examId}/start`, { method: 'POST', headers, body });
         const data = await response.json().catch(() => ({}));
 
         showLoader(false);
@@ -6899,58 +6900,135 @@ function openProctoringDashboard(examId) {
 
 function showProctoringConsentModal(examId) {
     const modalContent = `
-        <div style="text-align:center; padding: 8px 0 16px;">
-            <div style="width:72px;height:72px;background:rgba(37,99,235,.1);border-radius:50%;
-                        display:flex;align-items:center;justify-content:center;
-                        margin:0 auto 20px;font-size:32px;color:#2563eb;">
-                <i class="fas fa-shield-alt"></i>
+        <div style="padding: 4px 0 8px;">
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;">
+                <div style="width:52px;height:52px;background:rgba(37,99,235,.1);border-radius:50%;
+                            display:flex;align-items:center;justify-content:center;
+                            font-size:24px;color:#2563eb;flex-shrink:0;">
+                    <i class="fas fa-shield-alt"></i>
+                </div>
+                <div>
+                    <h2 style="margin:0 0 4px;font-size:18px;color:#1e293b;">Examen Surveillé — Attestation d'honneur</h2>
+                    <p style="margin:0;color:#64748b;font-size:13px;">Lisez les conditions et signez avant de démarrer</p>
+                </div>
             </div>
-            <h2 style="margin:0 0 10px;font-size:20px;color:#1e293b;">
-                Examen Surveillé par Caméra
-            </h2>
-            <p style="color:#64748b;font-size:14px;line-height:1.6;margin-bottom:24px;">
-                Cet examen est surveillé en temps réel via votre webcam et microphone.<br>
-                <strong>Vous devez autoriser l'accès à la caméra et au microphone</strong>
-                pour pouvoir composer.
-            </p>
 
             <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
-                        padding:16px;text-align:left;margin-bottom:24px;">
-                <div style="display:flex;flex-direction:column;gap:10px;">
+                        padding:14px 16px;margin-bottom:18px;">
+                <div style="display:flex;flex-direction:column;gap:9px;">
                     <div style="display:flex;align-items:center;gap:10px;font-size:13px;">
-                        <i class="fas fa-video" style="color:#2563eb;width:18px;text-align:center"></i>
-                        <span>Votre caméra sera activée pendant toute la durée de l'examen</span>
+                        <i class="fas fa-video" style="color:#2563eb;width:16px;text-align:center;flex-shrink:0;"></i>
+                        <span>Caméra et microphone activés pendant toute la durée</span>
                     </div>
                     <div style="display:flex;align-items:center;gap:10px;font-size:13px;">
-                        <i class="fas fa-microphone" style="color:#2563eb;width:18px;text-align:center"></i>
-                        <span>Votre microphone sera activé pour la détection audio</span>
+                        <i class="fas fa-user-check" style="color:#10b981;width:16px;text-align:center;flex-shrink:0;"></i>
+                        <span>Visage visible en permanence (détection faciale IA)</span>
                     </div>
                     <div style="display:flex;align-items:center;gap:10px;font-size:13px;">
-                        <i class="fas fa-user-check" style="color:#10b981;width:18px;text-align:center"></i>
-                        <span>Détection faciale automatique (votre visage doit être visible)</span>
+                        <i class="fas fa-expand" style="color:#f59e0b;width:16px;text-align:center;flex-shrink:0;"></i>
+                        <span>Plein écran obligatoire — tout changement d'onglet est enregistré</span>
                     </div>
                     <div style="display:flex;align-items:center;gap:10px;font-size:13px;">
-                        <i class="fas fa-expand" style="color:#f59e0b;width:18px;text-align:center"></i>
-                        <span>Mode plein écran obligatoire (tout changement sera signalé)</span>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:10px;font-size:13px;">
-                        <i class="fas fa-ban" style="color:#ef4444;width:18px;text-align:center"></i>
-                        <span>Tentatives de tricherie → bannissement immédiat</span>
+                        <i class="fas fa-ban" style="color:#ef4444;width:16px;text-align:center;flex-shrink:0;"></i>
+                        <span>Toute fraude entraîne un bannissement immédiat et définitif</span>
                     </div>
                 </div>
             </div>
 
-            <div style="display:flex;gap:10px;justify-content:center;">
-                <button class="btn btn-secondary" onclick="closeModal()">
+            <!-- Attestation d'honneur -->
+            <div style="background:#fff8ed;border:1px solid #f59e0b;border-radius:10px;padding:14px 16px;margin-bottom:16px;">
+                <p style="margin:0 0 4px;font-size:13px;font-weight:700;color:#92400e;">
+                    <i class="fas fa-file-signature" style="margin-right:6px;"></i>Attestation sur l'honneur
+                </p>
+                <p style="margin:0;font-size:12px;color:#78350f;line-height:1.6;">
+                    Je soussigné(e) <strong>${currentUser ? currentUser.full_name : ''}</strong>,
+                    certifie que je composerai cet examen seul(e), sans aide extérieure, sans document non autorisé,
+                    et sans aucun outil d'intelligence artificielle. Je reconnais que tout manquement à ces règles
+                    constitue une fraude académique passible de sanctions.
+                </p>
+            </div>
+
+            <!-- Zone de signature -->
+            <div style="margin-bottom:16px;">
+                <label style="font-size:12px;font-weight:700;color:#334155;display:block;margin-bottom:8px;">
+                    <i class="fas fa-pen-nib" style="color:#6366f1;margin-right:5px;"></i>
+                    Signez ci-dessous pour confirmer votre engagement <span style="color:#ef4444;">*</span>
+                </label>
+                <canvas id="pre-sig-canvas" width="480" height="120"
+                    style="border:2px solid #e2e8f0;border-radius:8px;display:block;cursor:crosshair;
+                           background:#fafafa;touch-action:none;width:100%;max-width:100%;"></canvas>
+                <div style="display:flex;justify-content:flex-end;margin-top:6px;">
+                    <button onclick="_clearPreSig()"
+                        style="background:none;border:none;color:#94a3b8;font-size:12px;cursor:pointer;padding:0;">
+                        <i class="fas fa-eraser"></i> Effacer
+                    </button>
+                </div>
+            </div>
+
+            <div style="display:flex;gap:10px;">
+                <button class="btn btn-secondary" onclick="closeModal()" style="flex:1;">
                     <i class="fas fa-times"></i> Annuler
                 </button>
-                <button class="btn btn-primary" onclick="closeModal(); _doStartOnlineExam(${examId})">
-                    <i class="fas fa-check"></i> J'accepte — Démarrer l'examen
+                <button class="btn btn-primary" id="pre-sig-start-btn" onclick="_validateAndStartExam(${examId})" style="flex:2;">
+                    <i class="fas fa-pen-nib"></i> Signer et démarrer l'examen
                 </button>
             </div>
         </div>
     `;
-    showModal(modalContent, '560px');
+    showModal(modalContent, '580px');
+
+    // Initialiser le pad de signature pré-examen après rendu du DOM
+    requestAnimationFrame(() => _initPreSigPad());
+}
+
+function _initPreSigPad() {
+    const canvas = document.getElementById('pre-sig-canvas');
+    if (!canvas) return;
+    // Ajuster la résolution interne du canvas à la taille affichée
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width || 480;
+    canvas.height = 120;
+    const ctx = canvas.getContext('2d');
+    let drawing = false, lastX = 0, lastY = 0;
+    function pos(e) {
+        const r = canvas.getBoundingClientRect();
+        const src = e.touches ? e.touches[0] : e;
+        return [(src.clientX - r.left) * (canvas.width / r.width),
+                (src.clientY - r.top)  * (canvas.height / r.height)];
+    }
+    function start(e) { e.preventDefault(); drawing = true; [lastX, lastY] = pos(e); }
+    function draw(e)  { e.preventDefault(); if (!drawing) return;
+        const [x, y] = pos(e);
+        ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(x, y);
+        ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.stroke();
+        [lastX, lastY] = [x, y]; }
+    function stop() { drawing = false; }
+    canvas.addEventListener('mousedown', start); canvas.addEventListener('mousemove', draw); canvas.addEventListener('mouseup', stop);
+    canvas.addEventListener('touchstart', start); canvas.addEventListener('touchmove', draw); canvas.addEventListener('touchend', stop);
+}
+
+function _clearPreSig() {
+    const c = document.getElementById('pre-sig-canvas');
+    if (c) c.getContext('2d').clearRect(0, 0, c.width, c.height);
+}
+
+function _validateAndStartExam(examId) {
+    const canvas = document.getElementById('pre-sig-canvas');
+    if (!canvas) return;
+    const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    const signed = pixels.some(v => v !== 0);
+    if (!signed) {
+        // Mettre en évidence la zone de signature
+        canvas.style.border = '2px solid #ef4444';
+        canvas.style.background = '#fef2f2';
+        const label = canvas.previousElementSibling;
+        if (label) label.style.color = '#ef4444';
+        showAlert('Veuillez signer l\'attestation avant de démarrer l\'examen.', 'error');
+        return;
+    }
+    const signatureData = canvas.toDataURL('image/png');
+    closeModal();
+    _doStartOnlineExam(examId, signatureData);
 }
 
 async function showExamCompositionInterface(examId, attempt) {
@@ -8669,55 +8747,150 @@ async function viewExamSubmissions(examId) {
         const exams    = await examsResp.json();
         const attempts = await attemptsResp.json();
         const exam     = exams.find(e => e.id === examId);
-
         if (!exam) { showAlert('Examen introuvable.', 'error'); showLoader(false); return; }
 
-        const submitted = attempts.filter(a => a.status === 'submitted' || a.status === 'auto_submitted');
-        const statusLabel = { submitted: 'Soumis', auto_submitted: 'Auto-soumis', banned: 'Banni', in_progress: 'En cours' };
+        const inProgress = attempts.filter(a => a.status === 'in_progress');
+        const done       = attempts.filter(a => a.status === 'submitted' || a.status === 'auto_submitted');
+        const banned     = attempts.filter(a => a.status === 'banned');
 
-        let rows = submitted.length === 0
-            ? `<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:32px;">Aucune copie soumise</td></tr>`
-            : submitted.map(a => `
+        const th = (label) => `<th style="padding:9px 12px;text-align:left;border-bottom:2px solid #e2e8f0;font-size:11px;text-transform:uppercase;color:#64748b;font-weight:600;">${label}</th>`;
+        const tdStyle = 'padding:10px 12px;border-bottom:1px solid #f1f5f9;font-size:13px;vertical-align:middle;';
+
+        // ── Section En cours ────────────────────────────────
+        const inProgressRows = inProgress.length === 0
+            ? `<tr><td colspan="4" style="${tdStyle}text-align:center;color:#94a3b8;">Aucun étudiant en cours</td></tr>`
+            : inProgress.map(a => `
                 <tr>
-                    <td><strong>${a.student_name || 'N/A'}</strong><br><small style="color:#64748b;">${a.student_email || ''}</small></td>
-                    <td>${a.submitted_at ? new Date(a.submitted_at).toLocaleString('fr-FR') : 'N/A'}</td>
-                    <td>${a.warnings_count > 0 ? `<span style="color:#ef4444;"><i class="fas fa-exclamation-circle"></i> ${a.warnings_count}</span>` : '<span style="color:#10b981;"><i class="fas fa-check"></i> Aucun</span>'}</td>
-                    <td>${a.score !== null ? `<strong style="color:${a.score>=10?'#10b981':'#ef4444'};font-size:16px;">${a.score}/20</strong>` : '<span style="color:#94a3b8;">Non corrigé</span>'}</td>
-                    <td>
-                        ${a.needs_correction
-                            ? `<button class="btn btn-sm btn-primary" onclick="closeModal();correctSingleAttempt(${a.id})"><i class="fas fa-magic"></i> Corriger</button>`
-                            : `<button class="btn btn-sm" onclick="closeModal();viewAttemptDetails(${a.id})" style="background:#f1f5f9;color:#475569;"><i class="fas fa-eye"></i> Voir</button>`}
+                    <td style="${tdStyle}"><strong>${a.student_name||'N/A'}</strong><br><small style="color:#64748b;">${a.student_email||''}</small></td>
+                    <td style="${tdStyle}">${a.started_at ? new Date(a.started_at).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '—'}</td>
+                    <td style="${tdStyle}">${a.warnings_count > 0
+                        ? `<span style="color:#ef4444;font-weight:600;"><i class="fas fa-exclamation-circle"></i> ${a.warnings_count}</span>`
+                        : `<span style="color:#10b981;"><i class="fas fa-check"></i> 0</span>`}</td>
+                    <td style="${tdStyle}">
+                        <span style="background:rgba(16,185,129,.1);color:#059669;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700;">
+                            <i class="fas fa-circle" style="font-size:7px;margin-right:4px;"></i>En cours
+                        </span>
                     </td>
                 </tr>`).join('');
 
-        const modalContent = `
-            <h2 style="margin-bottom:8px;"><i class="fas fa-file-alt"></i> Copies soumises — ${exam.title}</h2>
-            <p style="color:#64748b;margin-bottom:20px;">${submitted.length} copie(s) sur ${attempts.length} participant(s)</p>
-            ${submitted.length > 0 && submitted.some(a => a.needs_correction) ? `
-                <div style="margin-bottom:16px;">
-                    <button class="btn btn-success" onclick="closeModal();correctAllExamAttempts(${examId})">
-                        <i class="fas fa-magic"></i> Tout corriger avec IA
+        // ── Section Terminés ────────────────────────────────
+        const doneRows = done.length === 0
+            ? `<tr><td colspan="6" style="${tdStyle}text-align:center;color:#94a3b8;">Aucune copie soumise</td></tr>`
+            : done.map(a => {
+                const isAuto = a.status === 'auto_submitted';
+                const preSign = a.pre_exam_signature_data
+                    ? `<span title="Attestation signée avant l'examen" style="color:#10b981;font-size:11px;"><i class="fas fa-check-circle"></i> Pré</span>`
+                    : `<span title="Pas de signature pré-examen" style="color:#94a3b8;font-size:11px;"><i class="fas fa-times-circle"></i> Pré</span>`;
+                const postSign = a.signature_data
+                    ? `<span title="Signature de soumission" style="color:#10b981;font-size:11px;"><i class="fas fa-check-circle"></i> Post</span>`
+                    : `<span title="${isAuto ? 'Auto-soumis (pas de signature post)' : 'Pas de signature post'}" style="color:${isAuto ? '#f59e0b' : '#94a3b8'};font-size:11px;"><i class="fas fa-${isAuto ? 'clock' : 'times-circle'}"></i> Post</span>`;
+                return `
+                <tr>
+                    <td style="${tdStyle}"><strong>${a.student_name||'N/A'}</strong><br><small style="color:#64748b;">${a.student_email||''}</small></td>
+                    <td style="${tdStyle}">
+                        ${isAuto
+                            ? `<span style="background:rgba(245,158,11,.1);color:#d97706;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;"><i class="fas fa-clock"></i> Auto-soumis</span>`
+                            : `<span style="background:rgba(16,185,129,.1);color:#059669;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;"><i class="fas fa-check"></i> Soumis</span>`}
+                    </td>
+                    <td style="${tdStyle}">${a.submitted_at ? new Date(a.submitted_at).toLocaleString('fr-FR') : '—'}</td>
+                    <td style="${tdStyle}">
+                        <div style="display:flex;gap:8px;align-items:center;">${preSign}${postSign}</div>
+                    </td>
+                    <td style="${tdStyle}">${a.score !== null && a.score !== undefined
+                        ? `<strong style="color:${a.score>=10?'#10b981':'#ef4444'};font-size:15px;">${a.score}/20</strong>`
+                        : `<span style="color:#94a3b8;font-size:12px;">Non corrigé</span>`}</td>
+                    <td style="${tdStyle}">
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                            ${a.needs_correction
+                                ? `<button class="btn btn-sm btn-primary" onclick="closeModal();correctSingleAttempt(${a.id})" style="font-size:11px;padding:5px 10px;"><i class="fas fa-magic"></i> Corriger</button>`
+                                : `<button class="btn btn-sm" onclick="closeModal();viewAttemptDetails(${a.id})" style="background:#f1f5f9;color:#475569;font-size:11px;padding:5px 10px;"><i class="fas fa-eye"></i> Voir</button>`}
+                        </div>
+                    </td>
+                </tr>`;
+            }).join('');
+
+        // ── Section Bannis ───────────────────────────────────
+        const bannedRows = banned.length === 0 ? '' : banned.map(a => `
+            <tr>
+                <td style="${tdStyle}"><strong>${a.student_name||'N/A'}</strong><br><small style="color:#64748b;">${a.student_email||''}</small></td>
+                <td style="${tdStyle};color:#ef4444;">${a.ban_reason || 'Fraude détectée'}</td>
+                <td style="${tdStyle}">
+                    <button class="btn btn-sm" onclick="closeModal();unbanStudent(${a.id})" style="background:rgba(239,68,68,.1);color:#ef4444;font-size:11px;padding:5px 10px;">
+                        <i class="fas fa-user-check"></i> Débannir
                     </button>
-                </div>` : ''}
-            <div style="overflow-x:auto;">
-                <table style="width:100%;border-collapse:collapse;">
-                    <thead>
-                        <tr style="background:#f8fafc;">
-                            <th style="padding:10px;text-align:left;border-bottom:2px solid #e2e8f0;">Étudiant</th>
-                            <th style="padding:10px;text-align:left;border-bottom:2px solid #e2e8f0;">Soumis le</th>
-                            <th style="padding:10px;text-align:left;border-bottom:2px solid #e2e8f0;">Incidents</th>
-                            <th style="padding:10px;text-align:left;border-bottom:2px solid #e2e8f0;">Note</th>
-                            <th style="padding:10px;text-align:left;border-bottom:2px solid #e2e8f0;">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows}</tbody>
-                </table>
+                </td>
+            </tr>`).join('');
+
+        const hasToCorrected = done.some(a => a.needs_correction);
+
+        const modalContent = `
+            <div style="margin-bottom:16px;">
+                <h2 style="margin:0 0 4px;font-size:18px;"><i class="fas fa-file-alt"></i> ${exam.title}</h2>
+                <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;">
+                    <span style="background:rgba(16,185,129,.1);color:#059669;padding:4px 12px;border-radius:99px;font-size:12px;font-weight:600;">
+                        <i class="fas fa-circle" style="font-size:8px;"></i> ${inProgress.length} en cours
+                    </span>
+                    <span style="background:rgba(99,102,241,.1);color:#6366f1;padding:4px 12px;border-radius:99px;font-size:12px;font-weight:600;">
+                        <i class="fas fa-check-circle"></i> ${done.length} terminé(s)
+                    </span>
+                    ${banned.length > 0 ? `<span style="background:rgba(239,68,68,.1);color:#ef4444;padding:4px 12px;border-radius:99px;font-size:12px;font-weight:600;">
+                        <i class="fas fa-ban"></i> ${banned.length} banni(s)
+                    </span>` : ''}
+                    ${hasToCorrected ? `<button class="btn btn-success btn-sm" onclick="closeModal();correctAllExamAttempts(${examId})" style="margin-left:auto;">
+                        <i class="fas fa-magic"></i> Tout corriger (IA)
+                    </button>` : ''}
+                </div>
             </div>
-            <div style="margin-top:20px;text-align:right;">
+
+            <!-- EN COURS -->
+            <div style="margin-bottom:20px;">
+                <div style="font-size:12px;font-weight:700;color:#059669;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                    <span style="display:inline-block;width:8px;height:8px;background:#10b981;border-radius:50%;animation:pulse 1.5s infinite;"></span>
+                    En cours (${inProgress.length})
+                </div>
+                <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:8px;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead><tr style="background:#f8fafc;">${th('Étudiant')}${th('Démarré')}${th('Alertes')}${th('Statut')}</tr></thead>
+                        <tbody>${inProgressRows}</tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TERMINÉS -->
+            <div style="margin-bottom:20px;">
+                <div style="font-size:12px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">
+                    <i class="fas fa-check-circle"></i> Terminés (${done.length})
+                    <span style="font-weight:400;color:#64748b;font-size:11px;margin-left:8px;text-transform:none;">
+                        Pré = signature avant exam · Post = signature à la soumission
+                    </span>
+                </div>
+                <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:8px;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead><tr style="background:#f8fafc;">${th('Étudiant')}${th('Statut')}${th('Soumis le')}${th('Signatures')}${th('Note')}${th('Action')}</tr></thead>
+                        <tbody>${doneRows}</tbody>
+                    </table>
+                </div>
+            </div>
+
+            ${banned.length > 0 ? `
+            <!-- BANNIS -->
+            <div style="margin-bottom:20px;">
+                <div style="font-size:12px;font-weight:700;color:#ef4444;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">
+                    <i class="fas fa-ban"></i> Exclus (${banned.length})
+                </div>
+                <div style="overflow-x:auto;border:1px solid #fee2e2;border-radius:8px;background:#fff5f5;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead><tr style="background:#fef2f2;">${th('Étudiant')}${th('Raison')}${th('Action')}</tr></thead>
+                        <tbody>${bannedRows}</tbody>
+                    </table>
+                </div>
+            </div>` : ''}
+
+            <div style="text-align:right;">
                 <button class="btn btn-secondary" onclick="closeModal()"><i class="fas fa-times"></i> Fermer</button>
             </div>`;
 
-        showModal(modalContent, '900px');
+        showModal(modalContent, '960px');
     } catch(e) {
         showAlert(humanError(e), 'error');
     } finally {

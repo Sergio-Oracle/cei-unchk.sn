@@ -3824,12 +3824,17 @@ def start_exam_attempt(exam_id):
             session.close()
             return jsonify({'success': True, 'attempt': attempt_dict, 'continuing': True})
         
+        # Signature pré-examen transmise par le frontend
+        body = request.get_json(silent=True) or {}
+        pre_sig = body.get('pre_exam_signature')
+
         # Créer nouvelle tentative
         attempt = ExamAttempt(
             exam_id=exam_id,
             student_id=user_id,
             status=AttemptStatus.IN_PROGRESS,
-            answers='{}'
+            answers='{}',
+            pre_exam_signature_data=pre_sig
         )
         session.add(attempt)
         session.flush()  # obtenir attempt.id avant commit
