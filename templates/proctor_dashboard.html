@@ -218,6 +218,48 @@
             font-size:16px;font-weight:700;color:white;
         }
 
+        .submitted-overlay {
+            position:absolute;inset:0;
+            background:rgba(15,23,42,.88);
+            display:flex;flex-direction:column;align-items:center;justify-content:center;
+            gap:8px;color:rgba(255,255,255,.9);
+        }
+        .submitted-overlay i { font-size:32px;color:#10b981; }
+        .submitted-overlay .sub-label { font-size:12px;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:.05em; }
+        .submitted-overlay .sub-time  { font-size:11px;color:rgba(255,255,255,.5); }
+
+        /* ── Panneau Terminés ── */
+        #completed-panel {
+            margin:0 20px 20px;
+            background:rgba(255,255,255,.03);
+            border:1px solid rgba(255,255,255,.08);
+            border-radius:12px;
+            overflow:hidden;
+        }
+        #completed-panel-header {
+            display:flex;align-items:center;gap:10px;
+            padding:10px 16px;
+            background:rgba(255,255,255,.04);
+            cursor:pointer;
+            user-select:none;
+        }
+        #completed-panel-header:hover { background:rgba(255,255,255,.07); }
+        #completed-panel-header h4 { margin:0;font-size:13px;font-weight:700;color:rgba(255,255,255,.8); }
+        .completed-count-badge {
+            background:rgba(16,185,129,.2);color:#10b981;
+            font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;
+        }
+        #completed-list-wrap { display:none; }
+        .completed-table { width:100%;border-collapse:collapse; }
+        .completed-table th {
+            font-size:11px;text-transform:uppercase;color:rgba(255,255,255,.35);
+            padding:8px 14px;text-align:left;border-bottom:1px solid rgba(255,255,255,.06);
+            font-weight:600;letter-spacing:.06em;
+        }
+        .completed-table td { padding:10px 14px;font-size:12px;color:rgba(255,255,255,.75);border-bottom:1px solid rgba(255,255,255,.04); }
+        .completed-table tr:last-child td { border-bottom:none; }
+        .completed-table tr:hover td { background:rgba(255,255,255,.03); }
+
         /* ── Info étudiant ── */
         .card-info {
             padding: 12px 14px;
@@ -581,8 +623,10 @@
 
     <!-- Barre de filtre -->
     <div class="filter-bar">
-        <button class="filter-btn active" onclick="setFilter('all',this)">Tous</button>
-        <button class="filter-btn" onclick="setFilter('IN_PROGRESS',this)">En cours</button>
+        <button class="filter-btn" onclick="setFilter('all',this)">Tous</button>
+        <button class="filter-btn active" id="filter-btn-inprogress" onclick="setFilter('IN_PROGRESS',this)">
+            <i class="fas fa-circle" style="color:#10b981;font-size:8px;"></i> En cours
+        </button>
         <button class="filter-btn" onclick="setFilter('high_risk',this)">
             <i class="fas fa-exclamation-triangle"></i> Risque élevé
         </button>
@@ -594,8 +638,35 @@
         </button>
     </div>
 
-    <!-- Grille des étudiants -->
+    <!-- Grille des étudiants actifs -->
     <div class="students-grid" id="students-grid"></div>
+
+    <!-- Panneau Terminés (soumis / auto-soumis) -->
+    <div id="completed-panel" style="display:none;">
+        <div id="completed-panel-header" onclick="toggleCompletedPanel()">
+            <i class="fas fa-check-circle" style="color:#10b981;font-size:15px;"></i>
+            <h4>Copies terminées</h4>
+            <span class="completed-count-badge" id="completed-count-badge">0</span>
+            <i class="fas fa-chevron-down" id="completed-chevron"
+               style="margin-left:auto;color:rgba(255,255,255,.4);font-size:12px;transition:transform .2s;"></i>
+        </div>
+        <div id="completed-list-wrap">
+            <table class="completed-table">
+                <thead>
+                    <tr>
+                        <th>Étudiant</th>
+                        <th>Statut</th>
+                        <th>Soumis à</th>
+                        <th>Durée</th>
+                        <th>Risque</th>
+                        <th>Note</th>
+                        <th>Surveillant</th>
+                    </tr>
+                </thead>
+                <tbody id="completed-list"></tbody>
+            </table>
+        </div>
+    </div>
 
 </div>
 
@@ -762,7 +833,7 @@ let studentsData  = [];
 let proctorsData  = [];        // liste des surveillants (pour vue enseignant)
 let myRole        = null;      // 'professor'|'admin'|'surveillant'
 let myIdentity    = null;      // ex. 'proctor-42' ou 'teacher-7'
-let currentFilter = 'all';
+let currentFilter = 'IN_PROGRESS';
 let selectedAttemptId = null;
 let sendType = 'warning'; // 'warning' ou 'message'
 let banAttemptId = null;
@@ -871,6 +942,7 @@ async function loadData() {
 
     updateStats();
     renderGrid();
+    renderCompletedPanel();
 
     // Panneau surveillants (enseignant seulement)
     if (myRole !== 'surveillant') renderProctorsPanel();
@@ -965,6 +1037,55 @@ async function refreshData() {
     if (icon) icon.classList.add('fa-spin');
     try { await loadData(); } catch(e) {}
     setTimeout(() => { if (icon) icon.classList.remove('fa-spin'); }, 500);
+}
+
+// ── Panneau des copies terminées ────────────────────────────────────────────
+function renderCompletedPanel() {
+    const done = studentsData.filter(s =>
+        s.status === 'submitted' || s.status === 'auto_submitted'
+    );
+    const panel  = document.getElementById('completed-panel');
+    const badge  = document.getElementById('completed-count-badge');
+    const tbody  = document.getElementById('completed-list');
+    if (!panel || !badge || !tbody) return;
+
+    badge.textContent = done.length;
+    panel.style.display = done.length > 0 ? 'block' : 'none';
+
+    tbody.innerHTML = done.map(s => {
+        const isAuto = s.status === 'auto_submitted';
+        const statusHtml = isAuto
+            ? `<span style="background:rgba(245,158,11,.18);color:#d97706;font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;"><i class="fas fa-clock"></i> Auto-soumis</span>`
+            : `<span style="background:rgba(16,185,129,.15);color:#10b981;font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;"><i class="fas fa-check"></i> Soumis</span>`;
+        const submittedTime = s.submitted_at
+            ? new Date(s.submitted_at).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'})
+            : '—';
+        const duration = s.duration_minutes !== null && s.duration_minutes !== undefined
+            ? `${s.duration_minutes} min` : '—';
+        const riskClass = s.risk_score >= 70 ? '#ef4444' : s.risk_score >= 40 ? '#d97706' : '#10b981';
+        const score = s.score !== null && s.score !== undefined ? `${s.score}/20` : '<span style="color:rgba(255,255,255,.3)">En attente</span>';
+        return `<tr>
+            <td>
+                <div style="font-weight:600;color:white;">${s.student_name}</div>
+                <div style="font-size:10px;color:rgba(255,255,255,.4);">${s.student_email}</div>
+            </td>
+            <td>${statusHtml}</td>
+            <td style="color:rgba(255,255,255,.6);">${submittedTime}</td>
+            <td style="color:rgba(255,255,255,.6);">${duration}</td>
+            <td><span style="font-weight:700;color:${riskClass};">${s.risk_score}%</span></td>
+            <td>${score}</td>
+            <td style="color:rgba(255,255,255,.5);font-size:11px;">${s.proctor_name || '—'}</td>
+        </tr>`;
+    }).join('');
+}
+
+function toggleCompletedPanel() {
+    const wrap = document.getElementById('completed-list-wrap');
+    const chevron = document.getElementById('completed-chevron');
+    if (!wrap) return;
+    const open = wrap.style.display === 'block';
+    wrap.style.display = open ? 'none' : 'block';
+    if (chevron) chevron.style.transform = open ? '' : 'rotate(180deg)';
 }
 
 function updateStats() {
@@ -1088,6 +1209,21 @@ function updateCard(card, student) {
         videoDiv.appendChild(bannedOverlay);
     }
 
+    // Overlay soumis
+    const isDone = student.status === 'submitted' || student.status === 'auto_submitted';
+    let submittedOverlay = card.querySelector('.submitted-overlay');
+    if (isDone && !submittedOverlay && videoDiv && !student.banned) {
+        submittedOverlay = document.createElement('div');
+        submittedOverlay.className = 'submitted-overlay';
+        const timeStr = student.submitted_at
+            ? new Date(student.submitted_at).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '';
+        submittedOverlay.innerHTML = `
+            <i class="fas fa-check-circle"></i>
+            <span class="sub-label">${student.status === 'auto_submitted' ? 'Auto-soumis' : 'Copie soumise'}</span>
+            ${timeStr ? `<span class="sub-time">${timeStr}</span>` : ''}`;
+        videoDiv.appendChild(submittedOverlay);
+    }
+
     // Ré-attacher la vidéo si le track est disponible mais pas encore affiché
     const videoEl = card.querySelector(`#video-${student.attempt_id}`);
     if (videoEl && videoEl.style.display === 'none') {
@@ -1119,6 +1255,12 @@ function buildCardHTML(student) {
                 <span class="cv-risk-badge ${riskClass}">${student.risk_score}%</span>
             </div>
             ${student.banned ? '<div class="banned-overlay"><i class="fas fa-ban"></i> EXCLU</div>' : ''}
+            ${(student.status === 'submitted' || student.status === 'auto_submitted') ? `
+            <div class="submitted-overlay">
+                <i class="fas fa-check-circle"></i>
+                <span class="sub-label">${student.status === 'auto_submitted' ? 'Auto-soumis' : 'Copie soumise'}</span>
+                ${student.submitted_at ? `<span class="sub-time">${new Date(student.submitted_at).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</span>` : ''}
+            </div>` : ''}
         </div>
         <div class="card-info">
             <div class="card-name">${student.student_name}</div>

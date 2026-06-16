@@ -585,7 +585,14 @@ def get_active_proctoring(exam_id):
                 'tab_switches': a.tab_switches,
                 'no_face_count': a.no_face_count or 0,
                 'started_at': a.started_at.isoformat() if a.started_at else None,
+                'submitted_at': a.submitted_at.isoformat() if a.submitted_at else None,
+                'score': a.score,
                 'banned': a.status == AttemptStatus.BANNED,
+                'ban_reason': a.ban_reason if hasattr(a, 'ban_reason') else None,
+                'duration_minutes': (
+                    int((a.submitted_at - a.started_at).total_seconds() / 60)
+                    if a.submitted_at and a.started_at else None
+                ),
                 'livekit_identity': f'student-{a.student_id}',
                 'current_egress_id': a.current_egress_id,
                 'proctor_id': pid,
