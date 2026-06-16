@@ -598,6 +598,9 @@ def get_active_proctoring(exam_id):
                 'proctor_id': pid,
                 'proctor_name': proctor_names.get(pid, 'Non affecté') if pid else 'Non affecté',
                 'proctor_identity': f'proctor-{pid}' if pid else None,
+                'has_pre_sig': bool(a.pre_exam_signature_data),
+                'pre_sig_meta': a.pre_exam_signature_meta,
+                'has_post_sig': bool(a.signature_data),
             })
 
         # Filtrer la vue du surveillant (ne montrer que son groupe)
@@ -630,6 +633,31 @@ def get_active_proctoring(exam_id):
             'my_role': role,
             'my_identity': my_identity,
         })
+    finally:
+        session.close()
+
+
+# ============================================================================
+# API : SIGNATURE IMAGE (enseignant/admin uniquement)
+# ============================================================================
+
+@proctoring_bp.route('/api/exam_attempts/<int:attempt_id>/signature/<sig_type>', methods=['GET'])
+@jwt_required()
+def get_attempt_signature(attempt_id, sig_type):
+    """Retourne l'image de signature pré ou post examen (prof/admin)."""
+    claims = get_jwt()
+    if claims.get('role') not in ['professor', 'admin']:
+        return jsonify({'error': 'Accès non autorisé'}), 403
+    if sig_type not in ('pre', 'post'):
+        return jsonify({'error': 'Type de signature invalide'}), 400
+    session = get_session()
+    try:
+        attempt = session.query(ExamAttempt).filter_by(id=attempt_id).first()
+        if not attempt:
+            return jsonify({'error': 'Tentative non trouvée'}), 404
+        if sig_type == 'pre':
+            return jsonify({'data': attempt.pre_exam_signature_data, 'meta': attempt.pre_exam_signature_meta})
+        return jsonify({'data': attempt.signature_data, 'meta': None})
     finally:
         session.close()
 

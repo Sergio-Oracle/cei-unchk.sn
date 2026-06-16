@@ -426,6 +426,31 @@
             margin-bottom:16px;
         }
         @keyframes spin { to{transform:rotate(360deg)} }
+
+        /* ── Vue Enseignant ── */
+        .tv-stat-bar { display:flex;gap:10px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,.08); }
+        .tv-stat-chip { display:flex;flex-direction:column;align-items:center;padding:10px 18px;
+            background:rgba(255,255,255,.04);border-radius:10px;border:1px solid rgba(255,255,255,.08);min-width:90px; }
+        .tv-stat-chip .tv-val { font-size:22px;font-weight:700;line-height:1;margin-bottom:4px; }
+        .tv-stat-chip .tv-lbl { font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:rgba(255,255,255,.4); }
+        .tv-search-bar { padding:10px 20px;display:flex;gap:10px;align-items:center;border-bottom:1px solid rgba(255,255,255,.06); }
+        .tv-section { padding:0 20px 6px; }
+        .tv-section-hdr { display:flex;align-items:center;gap:10px;padding:14px 0 8px; }
+        .tv-section-hdr h3 { margin:0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:rgba(255,255,255,.45); }
+        .tv-badge { border-radius:99px;padding:2px 9px;font-size:11px;font-weight:700; }
+        .tv-badge.green { background:rgba(16,185,129,.2);color:#6ee7b7; }
+        .tv-badge.red   { background:rgba(239,68,68,.2);color:#fca5a5; }
+        .tv-badge.blue  { background:rgba(59,130,246,.2);color:#93c5fd; }
+        .tv-sig-btn { display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border-radius:6px;
+            font-size:10px;font-weight:600;border:none;cursor:pointer; }
+        .tv-sig-btn.pre    { background:rgba(99,102,241,.25);color:#c7d2fe; }
+        .tv-sig-btn.post   { background:rgba(16,185,129,.25);color:#6ee7b7; }
+        .tv-sig-btn.absent { background:rgba(255,255,255,.06);color:rgba(255,255,255,.25);cursor:default; }
+        .tv-empty { text-align:center;padding:20px;color:rgba(255,255,255,.3);font-size:12px; }
+        .tv-risk-badge { display:inline-block;padding:2px 7px;border-radius:6px;font-size:10px;font-weight:700; }
+        .tv-risk-badge.low    { background:rgba(16,185,129,.2);color:#6ee7b7; }
+        .tv-risk-badge.medium { background:rgba(245,158,11,.2);color:#fcd34d; }
+        .tv-risk-badge.high   { background:rgba(239,68,68,.2);color:#fca5a5; }
     </style>
 </head>
 <body>
@@ -469,6 +494,15 @@
         <div class="stat-pill" id="stat-messages-pill" style="background:rgba(37,99,235,.3);cursor:pointer;" onclick="openStudentMessages()" title="Messages des étudiants">
             <i class="fas fa-comment-dots"></i>
             <span id="stat-messages">0</span> message(s)
+        </div>
+        <!-- Pills enseignant uniquement -->
+        <div class="stat-pill" id="stat-submitted-pill" style="background:rgba(16,185,129,.3);display:none;">
+            <i class="fas fa-check-circle"></i>
+            <span id="stat-submitted">0</span> terminés
+        </div>
+        <div class="stat-pill" id="stat-avgscore-pill" style="background:rgba(59,130,246,.3);display:none;">
+            <i class="fas fa-star"></i>
+            Note moy. <span id="stat-avgscore">—</span>
         </div>
     </div>
 
@@ -621,6 +655,119 @@
         <div id="proctors-grid" style="display:flex;gap:12px;flex-wrap:wrap;"></div>
     </div>
 
+    <!-- ════ VUE ENSEIGNANT ════ -->
+    <div id="teacher-view" style="display:none;">
+
+        <!-- Barre stats enseignant -->
+        <div class="tv-stat-bar">
+            <div class="tv-stat-chip">
+                <span class="tv-val" id="tv-total" style="color:#f1f5f9;">0</span>
+                <span class="tv-lbl">Total</span>
+            </div>
+            <div class="tv-stat-chip">
+                <span class="tv-val" id="tv-inprogress-n" style="color:#10b981;">0</span>
+                <span class="tv-lbl">En cours</span>
+            </div>
+            <div class="tv-stat-chip">
+                <span class="tv-val" id="tv-done-n" style="color:#6ee7b7;">0</span>
+                <span class="tv-lbl">Terminés</span>
+            </div>
+            <div class="tv-stat-chip">
+                <span class="tv-val" id="tv-banned-n" style="color:#f87171;">0</span>
+                <span class="tv-lbl">Exclus</span>
+            </div>
+            <div class="tv-stat-chip">
+                <span class="tv-val" id="tv-avg-score" style="color:#93c5fd;">—</span>
+                <span class="tv-lbl">Note moy.</span>
+            </div>
+            <div class="tv-stat-chip">
+                <span class="tv-val" id="tv-avg-risk" style="color:#fcd34d;">0%</span>
+                <span class="tv-lbl">Risque moy.</span>
+            </div>
+        </div>
+
+        <!-- Barre de recherche enseignant -->
+        <div class="tv-search-bar">
+            <input type="text" id="tv-search" class="search-input"
+                   placeholder="Rechercher un étudiant…" oninput="renderTeacherView()"
+                   style="max-width:320px;margin:0;">
+            <button class="btn btn-light btn-sm" onclick="refreshData()">
+                <i class="fas fa-sync-alt" id="tv-refresh-icon"></i> Actualiser
+            </button>
+        </div>
+
+        <!-- Section En cours -->
+        <div class="tv-section" id="tv-inprogress-section">
+            <div class="tv-section-hdr">
+                <span style="width:8px;height:8px;border-radius:50%;background:#10b981;display:inline-block;"></span>
+                <h3>En cours</h3>
+                <span class="tv-badge green" id="tv-inprogress-badge">0</span>
+            </div>
+            <div style="overflow-x:auto;">
+            <table class="completed-table">
+                <thead><tr>
+                    <th>Étudiant</th>
+                    <th>Démarré à</th>
+                    <th>Durée</th>
+                    <th>Risque</th>
+                    <th>Tabs / Alertes</th>
+                    <th>Surveillant</th>
+                    <th>Actions</th>
+                </tr></thead>
+                <tbody id="tv-inprogress-body"></tbody>
+            </table>
+            </div>
+        </div>
+
+        <!-- Section Terminés -->
+        <div class="tv-section" id="tv-completed-section">
+            <div class="tv-section-hdr">
+                <i class="fas fa-check-circle" style="color:#10b981;font-size:13px;"></i>
+                <h3>Terminés</h3>
+                <span class="tv-badge green" id="tv-completed-badge">0</span>
+            </div>
+            <div style="overflow-x:auto;">
+            <table class="completed-table">
+                <thead><tr>
+                    <th>Étudiant</th>
+                    <th>Statut</th>
+                    <th>Soumis à</th>
+                    <th>Durée</th>
+                    <th>Note</th>
+                    <th>Risque</th>
+                    <th>Sig. pré-examen</th>
+                    <th>Sig. post-examen</th>
+                    <th>Surveillant</th>
+                </tr></thead>
+                <tbody id="tv-completed-body"></tbody>
+            </table>
+            </div>
+        </div>
+
+        <!-- Section Exclus -->
+        <div class="tv-section" id="tv-banned-section" style="padding-bottom:20px;">
+            <div class="tv-section-hdr">
+                <i class="fas fa-ban" style="color:#ef4444;font-size:13px;"></i>
+                <h3>Exclus</h3>
+                <span class="tv-badge red" id="tv-banned-badge">0</span>
+            </div>
+            <div style="overflow-x:auto;">
+            <table class="completed-table">
+                <thead><tr>
+                    <th>Étudiant</th>
+                    <th>Motif d'exclusion</th>
+                    <th>Risque</th>
+                    <th>Surveillant</th>
+                </tr></thead>
+                <tbody id="tv-banned-body"></tbody>
+            </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════ VUE SURVEILLANT ════ -->
+    <div id="surveillance-view">
+
     <!-- Barre de filtre -->
     <div class="filter-bar">
         <button class="filter-btn" onclick="setFilter('all',this)">Tous</button>
@@ -668,6 +815,20 @@
         </div>
     </div>
 
+    </div><!-- /surveillance-view -->
+</div>
+
+<!-- ════════ MODAL SIGNATURE ════════ -->
+<div id="modal-sig" class="modal">
+    <div class="modal-box" style="max-width:520px;text-align:center;">
+        <h2 id="modal-sig-title" style="font-size:15px;margin-bottom:4px;"></h2>
+        <div id="modal-sig-meta" style="font-size:11px;color:#94a3b8;margin-bottom:14px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;"></div>
+        <img id="modal-sig-img" src="" alt="Signature"
+             style="max-width:100%;border:2px solid rgba(255,255,255,.1);border-radius:8px;background:#fff;display:block;margin:0 auto 16px;">
+        <div class="modal-actions" style="justify-content:center;">
+            <button class="btn btn-light" onclick="document.getElementById('modal-sig').classList.remove('active')">Fermer</button>
+        </div>
+    </div>
 </div>
 
 <!-- ════════ PANNEAU LOGS ════════ -->
@@ -936,16 +1097,27 @@ async function loadData() {
     });
 
     document.getElementById('exam-title').textContent = data.exam_title || 'Examen';
-    const roleSuffix = myRole === 'surveillant' ? ' — Mon Groupe' : '';
-    document.getElementById('exam-subtitle').textContent =
-        `Dashboard de surveillance${roleSuffix} • Statut: ${data.exam_status || '?'}`;
 
     updateStats();
-    renderGrid();
-    renderCompletedPanel();
+    if (myRole === 'surveillant') {
+        renderGrid();
+        renderCompletedPanel();
+    } else {
+        renderTeacherView();
+    }
 
     // Panneau surveillants (enseignant seulement)
     if (myRole !== 'surveillant') renderProctorsPanel();
+
+    // Titre dynamique selon le rôle
+    const examStatus = data.exam_status || '?';
+    if (myRole === 'surveillant') {
+        document.getElementById('exam-subtitle').textContent =
+            `Vue surveillance — Mon groupe • Statut: ${examStatus}`;
+    } else {
+        document.getElementById('exam-subtitle').textContent =
+            `Vue pédagogique enseignant • Statut: ${examStatus}`;
+    }
 }
 
 function applyRoleUI() {
@@ -971,10 +1143,221 @@ function applyRoleUI() {
     if (camLabel) camLabel.textContent = isSurveillant ? 'Diffuser caméra' : 'Caméra';
     if (micLabel) micLabel.textContent = isSurveillant ? 'Diffuser micro' : 'Micro';
 
-    // Panneau surveillants humains (visible seulement enseignant/admin)
-    // La carte Agent IA (#agent-status-wrap) est TOUJOURS visible pour tous les rôles
+    // Panneau surveillants humains (enseignant seulement)
     const pp = document.getElementById('proctors-panel');
     if (pp) pp.style.display = isSurveillant ? 'none' : 'block';
+
+    // Bascule vue principale : enseignant ↔ surveillant
+    const teacherView      = document.getElementById('teacher-view');
+    const surveillanceView = document.getElementById('surveillance-view');
+    if (isSurveillant) {
+        if (teacherView)      teacherView.style.display      = 'none';
+        if (surveillanceView) surveillanceView.style.display = '';
+    } else {
+        if (teacherView)      teacherView.style.display      = '';
+        if (surveillanceView) surveillanceView.style.display = 'none';
+        // Pills enseignant dans le header
+        ['stat-submitted-pill', 'stat-avgscore-pill'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = '';
+        });
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// VUE ENSEIGNANT
+// ═══════════════════════════════════════════════════════════
+
+function renderTeacherView() {
+    const search = (document.getElementById('tv-search')?.value || '').toLowerCase();
+
+    const all        = studentsData.filter(s => !search ||
+        s.student_name.toLowerCase().includes(search) || (s.student_email || '').toLowerCase().includes(search));
+    const inProgress = all.filter(s => s.status === 'in_progress');
+    const completed  = all.filter(s => ['submitted','auto_submitted'].includes(s.status));
+    const banned     = all.filter(s => s.status === 'banned');
+
+    // Stats enseignant dans le teacher-view
+    const total   = studentsData.length;
+    const scored  = completed.filter(s => s.score !== null && s.score !== undefined);
+    const avgScore = scored.length
+        ? (scored.reduce((a,s) => a + s.score, 0) / scored.length).toFixed(1) + '/20'
+        : '—';
+    const avgRisk = total
+        ? Math.round(studentsData.reduce((a,s) => a + (s.risk_score || 0), 0) / total) + '%'
+        : '0%';
+
+    _setTv('tv-total',         total);
+    _setTv('tv-inprogress-n',  inProgress.length);
+    _setTv('tv-done-n',        completed.length);
+    _setTv('tv-banned-n',      banned.length);
+    _setTv('tv-avg-score',     avgScore);
+    _setTv('tv-avg-risk',      avgRisk);
+    _setTv('tv-inprogress-badge', inProgress.length);
+    _setTv('tv-completed-badge',  completed.length);
+    _setTv('tv-banned-badge',     banned.length);
+
+    // ── En cours ──
+    const ipBody = document.getElementById('tv-inprogress-body');
+    if (ipBody) {
+        if (!inProgress.length) {
+            ipBody.innerHTML = `<tr><td colspan="7" class="tv-empty">Aucun étudiant en cours</td></tr>`;
+        } else {
+            ipBody.innerHTML = inProgress.map(s => {
+                const riskCls = s.risk_score >= 70 ? 'high' : s.risk_score >= 40 ? 'medium' : 'low';
+                const elapsed = s.started_at ? _elapsed(s.started_at) : '—';
+                const nameEsc = (s.student_name || '?').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+                return `<tr>
+                    <td><strong>${s.student_name || '?'}</strong><br>
+                        <span style="color:rgba(255,255,255,.4);font-size:10px;">${s.student_email || ''}</span></td>
+                    <td>${s.started_at ? new Date(s.started_at).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '—'}</td>
+                    <td>${elapsed}</td>
+                    <td><span class="tv-risk-badge ${riskCls}">${s.risk_score || 0}%</span></td>
+                    <td>
+                        <span style="color:${s.tab_switches > 2 ? '#fcd34d' : 'rgba(255,255,255,.5)'};">Tabs: ${s.tab_switches || 0}</span>
+                        &nbsp;·&nbsp;
+                        <span style="color:${s.warnings_count > 0 ? '#fca5a5' : 'rgba(255,255,255,.5)'};">Alertes: ${s.warnings_count || 0}</span>
+                    </td>
+                    <td style="color:rgba(255,255,255,.6);">${s.proctor_name || '—'}</td>
+                    <td>
+                        <button onclick="openSendModal(${s.attempt_id},'${nameEsc}','message')"
+                            style="background:rgba(37,99,235,.2);color:#93c5fd;border:none;padding:3px 8px;border-radius:5px;font-size:10px;cursor:pointer;margin-right:4px;">
+                            <i class="fas fa-comment"></i> Message
+                        </button>
+                        <button onclick="openSendModal(${s.attempt_id},'${nameEsc}','warning')"
+                            style="background:rgba(245,158,11,.2);color:#fcd34d;border:none;padding:3px 8px;border-radius:5px;font-size:10px;cursor:pointer;">
+                            <i class="fas fa-exclamation-triangle"></i> Avertir
+                        </button>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+    }
+
+    // ── Terminés ──
+    const cBody = document.getElementById('tv-completed-body');
+    if (cBody) {
+        if (!completed.length) {
+            cBody.innerHTML = `<tr><td colspan="9" class="tv-empty">Aucune copie soumise</td></tr>`;
+        } else {
+            cBody.innerHTML = completed.map(s => {
+                const riskCls   = s.risk_score >= 70 ? 'high' : s.risk_score >= 40 ? 'medium' : 'low';
+                const isAuto    = s.status === 'auto_submitted';
+                const statusBadge = isAuto
+                    ? `<span style="background:rgba(99,102,241,.2);color:#c7d2fe;border-radius:4px;padding:2px 7px;font-size:10px;">Auto</span>`
+                    : `<span style="background:rgba(16,185,129,.2);color:#6ee7b7;border-radius:4px;padding:2px 7px;font-size:10px;">Soumis</span>`;
+                const subTime = s.submitted_at
+                    ? new Date(s.submitted_at).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '—';
+                const dur  = s.duration_minutes != null ? `${s.duration_minutes} min` : '—';
+                const note = s.score != null ? `${s.score}/20` : '—';
+
+                let preSigBtn, postSigBtn;
+                if (s.has_pre_sig) {
+                    let metaStr = '';
+                    try {
+                        const m = typeof s.pre_sig_meta === 'string' ? JSON.parse(s.pre_sig_meta) : s.pre_sig_meta;
+                        if (m) metaStr = `Traits:${m.strokes||'?'} · ${Math.round((m.duration_ms||0)/1000)}s`;
+                    } catch(e){}
+                    preSigBtn = `<button class="tv-sig-btn pre" onclick="showTeacherSig(${s.attempt_id},'pre','Signature pré-examen — ${s.student_name.replace(/'/g,"\\'")}')">
+                        <i class="fas fa-signature"></i> Voir${metaStr ? ` <small style="opacity:.6;">(${metaStr})</small>` : ''}
+                    </button>`;
+                } else {
+                    preSigBtn = `<span class="tv-sig-btn absent"><i class="fas fa-times-circle"></i> Absente</span>`;
+                }
+
+                if (isAuto) {
+                    postSigBtn = `<span class="tv-sig-btn absent" title="Auto-soumission — signature non requise"><i class="fas fa-robot"></i> Auto</span>`;
+                } else if (s.has_post_sig) {
+                    postSigBtn = `<button class="tv-sig-btn post" onclick="showTeacherSig(${s.attempt_id},'post','Signature post-examen — ${s.student_name.replace(/'/g,"\\'")}')">
+                        <i class="fas fa-signature"></i> Voir
+                    </button>`;
+                } else {
+                    postSigBtn = `<span class="tv-sig-btn absent"><i class="fas fa-times-circle"></i> Absente</span>`;
+                }
+
+                return `<tr>
+                    <td><strong>${s.student_name || '?'}</strong><br>
+                        <span style="color:rgba(255,255,255,.4);font-size:10px;">${s.student_email || ''}</span></td>
+                    <td>${statusBadge}</td>
+                    <td>${subTime}</td>
+                    <td>${dur}</td>
+                    <td style="font-weight:700;color:${s.score != null ? '#93c5fd' : 'rgba(255,255,255,.4)'};">${note}</td>
+                    <td><span class="tv-risk-badge ${riskCls}">${s.risk_score || 0}%</span></td>
+                    <td>${preSigBtn}</td>
+                    <td>${postSigBtn}</td>
+                    <td style="color:rgba(255,255,255,.6);">${s.proctor_name || '—'}</td>
+                </tr>`;
+            }).join('');
+        }
+    }
+
+    // ── Exclus ──
+    const bBody = document.getElementById('tv-banned-body');
+    if (bBody) {
+        if (!banned.length) {
+            bBody.innerHTML = `<tr><td colspan="4" class="tv-empty">Aucun étudiant exclu</td></tr>`;
+        } else {
+            bBody.innerHTML = banned.map(s => {
+                const riskCls = s.risk_score >= 70 ? 'high' : s.risk_score >= 40 ? 'medium' : 'low';
+                return `<tr>
+                    <td><strong>${s.student_name || '?'}</strong><br>
+                        <span style="color:rgba(255,255,255,.4);font-size:10px;">${s.student_email || ''}</span></td>
+                    <td style="color:#fca5a5;">${s.ban_reason || '—'}</td>
+                    <td><span class="tv-risk-badge ${riskCls}">${s.risk_score || 0}%</span></td>
+                    <td style="color:rgba(255,255,255,.6);">${s.proctor_name || '—'}</td>
+                </tr>`;
+            }).join('');
+        }
+    }
+
+    // Afficher/masquer sections vides
+    const noStudents = !studentsData.length;
+    if (document.getElementById('tv-inprogress-section'))
+        document.getElementById('tv-inprogress-section').style.display = (!search && !inProgress.length && !noStudents) ? 'none' : '';
+    if (document.getElementById('tv-completed-section'))
+        document.getElementById('tv-completed-section').style.display = (!search && !completed.length && !noStudents) ? 'none' : '';
+    if (document.getElementById('tv-banned-section'))
+        document.getElementById('tv-banned-section').style.display = (!search && !banned.length && !noStudents) ? 'none' : '';
+}
+
+function _setTv(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+}
+
+function _elapsed(isoStr) {
+    if (!isoStr) return '—';
+    const diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
+    if (diff < 60) return `${diff}s`;
+    if (diff < 3600) return `${Math.floor(diff/60)} min`;
+    return `${Math.floor(diff/3600)}h${String(Math.floor((diff%3600)/60)).padStart(2,'0')}`;
+}
+
+async function showTeacherSig(attemptId, sigType, title) {
+    try {
+        const resp = await api(`/api/exam_attempts/${attemptId}/signature/${sigType}`);
+        if (!resp.ok) { toast('Signature introuvable', 'error'); return; }
+        const d = await resp.json();
+        if (!d.data) { toast('Aucune signature enregistrée', 'info'); return; }
+        document.getElementById('modal-sig-title').textContent = title;
+        document.getElementById('modal-sig-img').src = d.data;
+
+        // Métadonnées
+        let metaHtml = '';
+        if (d.meta) {
+            try {
+                const m = typeof d.meta === 'string' ? JSON.parse(d.meta) : d.meta;
+                if (m.strokes)      metaHtml += `<span style="background:rgba(255,255,255,.1);padding:2px 8px;border-radius:6px;">Traits: ${m.strokes}</span>`;
+                if (m.duration_ms)  metaHtml += `<span style="background:rgba(255,255,255,.1);padding:2px 8px;border-radius:6px;">Durée: ${(m.duration_ms/1000).toFixed(1)}s</span>`;
+                if (m.path_length)  metaHtml += `<span style="background:rgba(255,255,255,.1);padding:2px 8px;border-radius:6px;">Longueur: ${Math.round(m.path_length)}px</span>`;
+                if (m.signed_at)    metaHtml += `<span style="background:rgba(255,255,255,.1);padding:2px 8px;border-radius:6px;">${new Date(m.signed_at).toLocaleString('fr-FR')}</span>`;
+            } catch(e){}
+        }
+        document.getElementById('modal-sig-meta').innerHTML = metaHtml;
+        document.getElementById('modal-sig').classList.add('active');
+    } catch(e) {
+        toast('Erreur lors du chargement de la signature', 'error');
+    }
 }
 
 function renderProctorsPanel() {
@@ -1033,10 +1416,17 @@ function renderProctorsPanel() {
 }
 
 async function refreshData() {
-    const icon = document.getElementById('refresh-icon');
-    if (icon) icon.classList.add('fa-spin');
+    ['refresh-icon','tv-refresh-icon'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('fa-spin');
+    });
     try { await loadData(); } catch(e) {}
-    setTimeout(() => { if (icon) icon.classList.remove('fa-spin'); }, 500);
+    setTimeout(() => {
+        ['refresh-icon','tv-refresh-icon'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.remove('fa-spin');
+        });
+    }, 500);
 }
 
 // ── Panneau des copies terminées ────────────────────────────────────────────
@@ -1089,13 +1479,25 @@ function toggleCompletedPanel() {
 }
 
 function updateStats() {
-    const active   = studentsData.filter(s => s.status === 'in_progress').length;
-    const highRisk = studentsData.filter(s => s.risk_score >= 70).length;
-    const banned   = studentsData.filter(s => s.banned).length;
+    const active    = studentsData.filter(s => s.status === 'in_progress').length;
+    const highRisk  = studentsData.filter(s => s.risk_score >= 70).length;
+    const banned    = studentsData.filter(s => s.banned).length;
+    const submitted = studentsData.filter(s => ['submitted','auto_submitted'].includes(s.status)).length;
 
     document.getElementById('stat-active').textContent   = active;
     document.getElementById('stat-highrisk').textContent = highRisk;
     document.getElementById('stat-banned').textContent   = banned;
+
+    // Stats enseignant (header pills)
+    const subEl = document.getElementById('stat-submitted');
+    if (subEl) subEl.textContent = submitted;
+    const scored = studentsData.filter(s => s.score !== null && s.score !== undefined);
+    const avgScoreEl = document.getElementById('stat-avgscore');
+    if (avgScoreEl) {
+        avgScoreEl.textContent = scored.length
+            ? (scored.reduce((a,s) => a + s.score, 0) / scored.length).toFixed(1) + '/20'
+            : '—';
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
