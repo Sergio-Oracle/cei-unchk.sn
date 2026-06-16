@@ -34,7 +34,7 @@ from models import (
     UserRole, ReclamationStatus,
     Formation, Semester, UE, EC, ECAssignment, StudentUEEnrollment,
     OnlineExam, ExamAttempt, ExamActivityLog, GradeTranscript, CameraLog,
-    ExamStatus, AttemptStatus,  
+    ExamStatus, AttemptStatus, ExamProctor, ProctorAssignment,
     get_session, init_db
 )
 
@@ -48,31 +48,10 @@ from utils import (
     generate_corrected_paper_pdf,
     generate_statistics_chart,
     allowed_file, calculate_file_hash, extract_student_name_from_content,
-    match_student_by_name  # Utilitaires améliorés
+    match_student_by_name
 )
 from proctoring_routes import proctoring_bp
 from swagger_docs import swagger_bp
-
-# ... autres imports ...
-from models import (
-    User, Subject, StudentPaper, Reclamation, CorrectionHistory,
-    UserRole, ReclamationStatus,
-    Formation, Semester, UE, EC, ECAssignment, StudentUEEnrollment,
-    OnlineExam, ExamAttempt, ExamActivityLog, GradeTranscript,
-    ExamStatus, AttemptStatus, ExamProctor, ProctorAssignment,
-    get_session, init_db
-)
-
-from export_route import register_export_route
-from utils import (
-    send_account_created_email, send_paper_corrected_email,
-    extract_text_from_file,
-    generate_pdf_report,
-    generate_corrected_paper_pdf,
-    generate_statistics_chart,
-    allowed_file, calculate_file_hash, extract_student_name_from_content,
-    match_student_by_name
-)
 
 # ✅ AJOUTEZ CETTE FONCTION ICI
 def normalize_name(name):
@@ -1189,6 +1168,29 @@ def delete_ue(ue_id):
         print(f"❌ Erreur delete_ue: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/ues', methods=['GET'])
+@jwt_required()
+def list_all_ues():
+    """Liste toutes les UEs — pour les modaux d'édition"""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        claims = get_jwt()
+        if claims.get('role') not in ['professor', 'admin']:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        ues = session.query(UE).order_by(UE.name).all()
+        result = [u.to_dict() for u in ues]
+        session.close()
+        return jsonify(result)
+    except Exception as e:
+        print(f"❌ list_all_ues: {e}")
+        try:
+            session.close()
+        except Exception:
+            pass
+        return jsonify({'error': str(e)}), 500
+
 # ============================================================================
 # ROUTES CRUD ECs (ADMIN ONLY)
 # ============================================================================
@@ -1703,6 +1705,10 @@ def get_proctor_users():
         return jsonify(result)
     except Exception as e:
         print(f'Erreur get_proctor_users: {e}')
+        try:
+            session.close()
+        except Exception:
+            pass
         return jsonify({'error': str(e)}), 500
 
 
@@ -2236,6 +2242,7 @@ Total: 20 points"""
 # ROUTES CORRECTION DE COPIES
 # ============================================================================
 
+@app.route('/api/papers/correct', methods=['POST'])
 @app.route('/api/papers/upload', methods=['POST'])
 @jwt_required()
 def upload_paper():
@@ -4224,6 +4231,10 @@ def submit_exam_attempt(attempt_id):
         return jsonify({'success': True, 'message': 'Examen soumis avec succès', 'auto_correct': False})
     except Exception as e:
         print(f"Erreur submit_exam_attempt: {e}")
+        try:
+            session.close()
+        except Exception:
+            pass
         return jsonify({'error': str(e)}), 500
 
 # ============================================================================
@@ -4737,7 +4748,8 @@ def export_exam_results_csv(exam_id):
                 'submitted': 'Soumis', 'in_progress': 'En cours',
                 'banned': 'Banni', 'timed_out': 'Temps écoulé'
             }
-            status_label = status_labels.get(a.status.value if a.status else '', str(a.status))
+            status_val = (a.status.value if hasattr(a.status, 'value') else str(a.status)) if a.status else ''
+            status_label = status_labels.get(status_val, str(a.status))
 
             duration = ''
             if a.started_at and a.submitted_at:
