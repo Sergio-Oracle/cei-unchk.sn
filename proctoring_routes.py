@@ -2027,6 +2027,34 @@ def agent_get_alerts():
     if role not in ['professor', 'admin', 'surveillant']:
         return jsonify({'error': 'Accès non autorisé'}), 403
     alerts = _load_alerts()
+
+    # Auto-marquer comme lues les alertes d'étudiants qui ne sont plus en cours
+    unread_attempt_ids = list({
+        a.get('attempt_id') for a in alerts
+        if not a.get('read') and a.get('attempt_id') is not None
+    })
+    if unread_attempt_ids:
+        session = get_session()
+        try:
+            completed_ids = {
+                att.id for att in session.query(ExamAttempt)
+                .filter(ExamAttempt.id.in_(unread_attempt_ids))
+                .filter(ExamAttempt.status != AttemptStatus.IN_PROGRESS)
+                .all()
+            }
+        except Exception:
+            completed_ids = set()
+        finally:
+            session.close()
+        if completed_ids:
+            changed = False
+            for a in alerts:
+                if not a.get('read') and a.get('attempt_id') in completed_ids:
+                    a['read'] = True
+                    changed = True
+            if changed:
+                _save_alerts(alerts)
+
     unread = [a for a in alerts if not a.get('read')]
     return jsonify({'alerts': unread[-50:], 'total_unread': len(unread)})
 

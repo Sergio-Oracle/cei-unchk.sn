@@ -153,7 +153,10 @@ def _ai_analyze(student_name: str, risk_score: int, no_face: int,
     except Exception as e:
         print(f"⚠️  Ollama analyse : {e}")
 
-    return "Analyse IA indisponible — vérification manuelle recommandée."
+    # Fallback règle-basée si Ollama échoue
+    if risk_score >= RISK_URGENT:
+        return "Comportement hautement suspect — intervention immédiate recommandée."
+    return "Anomalies répétées détectées — surveillance renforcée conseillée."
 
 
 # ── Cycle de surveillance ─────────────────────────────────────────────────────

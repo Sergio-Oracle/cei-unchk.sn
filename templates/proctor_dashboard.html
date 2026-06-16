@@ -1116,11 +1116,31 @@ function renderGrid() {
     });
 
     if (filtered.length === 0) {
-        grid.innerHTML = `
-            <div class="empty-grid">
-                <i class="fas fa-users-slash"></i>
-                <p>Aucun étudiant correspondant</p>
-            </div>`;
+        const search = (document.getElementById('search-input').value || '').trim();
+        let icon = 'fa-users-slash', msg = 'Aucun étudiant correspondant';
+        if (!search) {
+            if (currentFilter === 'IN_PROGRESS') {
+                const doneCount = studentsData.filter(s => ['submitted','auto_submitted'].includes(s.status)).length;
+                const bannedCount = studentsData.filter(s => s.status === 'banned').length;
+                if (doneCount > 0 || bannedCount > 0) {
+                    icon = 'fa-check-circle';
+                    const parts = [];
+                    if (doneCount > 0) parts.push(`${doneCount} cop${doneCount > 1 ? 'ies' : 'ie'} soumise${doneCount > 1 ? 's' : ''}`);
+                    if (bannedCount > 0) parts.push(`${bannedCount} exclu${bannedCount > 1 ? 's' : ''}`);
+                    msg = `Tous les étudiants ont terminé<br><small style="color:#64748b;">${parts.join(' · ')} — voir les panneaux ci-dessous</small>`;
+                } else {
+                    icon = 'fa-hourglass-start';
+                    msg = 'En attente de connexion des étudiants';
+                }
+            } else if (currentFilter === 'BANNED') {
+                icon = 'fa-shield-check';
+                msg = 'Aucun étudiant exclu';
+            } else if (currentFilter === 'high_risk') {
+                icon = 'fa-shield-check';
+                msg = 'Aucun étudiant à risque élevé';
+            }
+        }
+        grid.innerHTML = `<div class="empty-grid"><i class="fas ${icon}"></i><p>${msg}</p></div>`;
         return;
     }
 
