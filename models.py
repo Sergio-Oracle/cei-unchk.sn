@@ -28,9 +28,10 @@ class UserRole(enum.Enum):
     SURVEILLANT = "surveillant"
 
 class ReclamationStatus(enum.Enum):
-    PENDING = "pending"
-    RESOLVED = "resolved"
-    REJECTED = "rejected"
+    PENDING   = "pending"
+    IN_REVIEW = "in_review"
+    RESOLVED  = "resolved"
+    REJECTED  = "rejected"
 
 # MODÈLES POUR LA MAQUETTE PÉDAGOGIQUE
 class Formation(Base):

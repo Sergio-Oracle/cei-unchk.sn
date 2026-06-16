@@ -5889,7 +5889,11 @@ async function loadOnlineExams() {
                 <button class="btn btn-primary" onclick="showCreateOnlineExamModal()"
                     style="display:inline-flex;align-items:center;gap:8px;padding:11px 20px;">
                     <i class="fas fa-plus"></i> Créer un Examen
-                </button>` : ''}
+                </button>` : `
+                <button onclick="showStudentExamHistory()"
+                    style="display:inline-flex;align-items:center;gap:8px;padding:9px 18px;background:#ede9fe;color:#6366f1;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
+                    <i class="fas fa-history"></i> Mon historique
+                </button>`}
             </div>
         `;
 
@@ -8836,6 +8840,7 @@ ${exam.instructions}
 }
 
 async function viewExamSubmissions(examId) {
+    window._currentViewedExamId = examId;
     showLoader(true);
     try {
         const [examsResp, attemptsResp] = await Promise.all([
@@ -8848,7 +8853,7 @@ async function viewExamSubmissions(examId) {
         if (!exam) { showAlert('Examen introuvable.', 'error'); showLoader(false); return; }
 
         const inProgress = attempts.filter(a => a.status === 'in_progress');
-        const done       = attempts.filter(a => a.status === 'submitted' || a.status === 'auto_submitted');
+        const done       = attempts.filter(a => ['submitted','auto_submitted','graded'].includes(a.status));
         const banned     = attempts.filter(a => a.status === 'banned');
 
         const th = (label) => `<th style="padding:9px 12px;text-align:left;border-bottom:2px solid #e2e8f0;font-size:11px;text-transform:uppercase;color:#64748b;font-weight:600;">${label}</th>`;
@@ -8910,10 +8915,18 @@ async function viewExamSubmissions(examId) {
                         ? `<strong style="color:${a.score>=10?'#10b981':'#ef4444'};font-size:15px;">${a.score}/20</strong>`
                         : `<span style="color:#94a3b8;font-size:12px;">Non corrigé</span>`}</td>
                     <td style="${tdStyle}">
-                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        <div style="display:flex;gap:5px;flex-wrap:wrap;">
                             ${a.needs_correction
-                                ? `<button class="btn btn-sm btn-primary" onclick="closeModal();correctSingleAttempt(${a.id})" style="font-size:11px;padding:5px 10px;"><i class="fas fa-magic"></i> Corriger</button>`
-                                : `<button class="btn btn-sm" onclick="closeModal();viewAttemptDetails(${a.id})" style="background:#f1f5f9;color:#475569;font-size:11px;padding:5px 10px;"><i class="fas fa-eye"></i> Voir</button>`}
+                                ? `<button class="btn btn-sm btn-primary" onclick="closeModal();correctSingleAttempt(${a.id})" style="font-size:10px;padding:4px 8px;"><i class="fas fa-magic"></i> Corriger</button>`
+                                : `<button class="btn btn-sm" onclick="closeModal();viewAttemptDetails(${a.id})" style="background:#f1f5f9;color:#475569;font-size:10px;padding:4px 8px;"><i class="fas fa-eye"></i> Voir</button>`}
+                            <button class="btn btn-sm" onclick="showManualGradingModal(${a.id},'${(a.student_name||'').replace(/'/g,'\\'')}',${a.score !== null && a.score !== undefined ? a.score : 'null'})"
+                                style="background:#ede9fe;color:#6366f1;font-size:10px;padding:4px 8px;" title="Correction manuelle">
+                                <i class="fas fa-pen"></i>
+                            </button>
+                            <button class="btn btn-sm" onclick="downloadIntegrityReport(${a.id},'${(a.student_name||'etudiant').replace(/'/g,'').replace(/\s+/g,'_')}')"
+                                style="background:#fef3c7;color:#d97706;font-size:10px;padding:4px 8px;" title="Rapport intégrité PDF">
+                                <i class="fas fa-file-pdf"></i>
+                            </button>
                         </div>
                     </td>
                 </tr>`;
@@ -8949,6 +8962,21 @@ async function viewExamSubmissions(examId) {
                     ${hasToCorrected ? `<button class="btn btn-success btn-sm" onclick="closeModal();correctAllExamAttempts(${examId})" style="margin-left:auto;">
                         <i class="fas fa-magic"></i> Tout corriger (IA)
                     </button>` : ''}
+                </div>
+                <!-- Barre d'outils examen -->
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid #f1f5f9;">
+                    <button class="btn btn-sm" onclick="showExamStats(${examId})"
+                        style="background:#ede9fe;color:#6366f1;font-size:12px;padding:6px 12px;">
+                        <i class="fas fa-chart-bar"></i> Statistiques
+                    </button>
+                    <button class="btn btn-sm" onclick="exportExamCSV(${examId},'${(exam.title||'').replace(/'/g,'').replace(/"/g,'')}')"
+                        style="background:#d1fae5;color:#059669;font-size:12px;padding:6px 12px;">
+                        <i class="fas fa-file-csv"></i> Export CSV
+                    </button>
+                    <button class="btn btn-sm" onclick="showPlagiarismReport(${examId},'${(exam.title||'').replace(/'/g,'').replace(/"/g,'')}')"
+                        style="background:#fee2e2;color:#ef4444;font-size:12px;padding:6px 12px;">
+                        <i class="fas fa-search"></i> Plagiat
+                    </button>
                 </div>
             </div>
 
@@ -11128,6 +11156,337 @@ async function saveProfileInfo() {
             showAlert(d.error || 'Erreur lors de la mise à jour.', 'error');
         }
     } catch (e) { showAlert('Erreur de connexion.', 'error'); }
+}
+
+// ============================================================================
+// EXPORT CSV DES NOTES
+// ============================================================================
+
+async function exportExamCSV(examId, examTitle) {
+    try {
+        const resp = await fetch(`/api/online_exams/${examId}/export-csv`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!resp.ok) { showAlert('Erreur lors de l\'export CSV.', 'error'); return; }
+        const blob = await resp.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = `notes_${(examTitle||examId).replace(/\s+/g,'_')}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        URL.revokeObjectURL(url);
+        a.remove();
+    } catch(e) { showAlert('Erreur export CSV : ' + (e.serverMessage || e.message), 'error'); }
+}
+
+// ============================================================================
+// STATISTIQUES PAR EXAMEN
+// ============================================================================
+
+async function showExamStats(examId) {
+    showLoader(true);
+    try {
+        const resp = await authenticatedFetch(`/api/online_exams/${examId}/stats`);
+        const s    = await resp.json();
+        const bar  = (pct, color) => `<div style="height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;margin-top:3px;">
+            <div style="width:${Math.min(pct,100)}%;height:100%;background:${color};border-radius:4px;"></div></div>`;
+        const distLabels  = ['0–4', '5–9', '10–13', '14–16', '17–20'];
+        const distColors  = ['#ef4444','#f97316','#10b981','#3b82f6','#6366f1'];
+        const maxDist     = Math.max(...(s.distribution||[0]));
+        const distRows    = (s.distribution||[]).map((n,i) => `
+            <tr>
+                <td style="padding:5px 8px;font-size:12px;color:#475569;width:50px;">${distLabels[i]}</td>
+                <td style="padding:5px 8px;">
+                    ${bar(maxDist ? n/maxDist*100 : 0, distColors[i])}
+                </td>
+                <td style="padding:5px 8px;font-size:12px;font-weight:700;color:#1e293b;width:30px;">${n}</td>
+            </tr>`).join('');
+        const kpi = (label, val, color='#1e293b') =>
+            `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;flex:1;min-width:110px;">
+                <div style="font-size:18px;font-weight:700;color:${color};">${val ?? '—'}</div>
+                <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">${label}</div>
+             </div>`;
+        showModal(`
+            <div style="max-width:640px;">
+                <h2 style="margin:0 0 4px;font-size:17px;"><i class="fas fa-chart-bar" style="color:#6366f1;margin-right:8px;"></i>Statistiques</h2>
+                <p style="color:#64748b;margin:0 0 16px;font-size:13px;">${s.exam_title||''}</p>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+                    ${kpi('Total inscrits', s.total)}
+                    ${kpi('Soumis', s.submitted, '#6366f1')}
+                    ${kpi('Corrigés', s.corrected, '#0ea5e9')}
+                    ${kpi('Bannis', s.banned, '#ef4444')}
+                </div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;">
+                    ${kpi('Moyenne', s.avg_score!=null ? s.avg_score+'/20' : '—', s.avg_score>=10?'#10b981':'#ef4444')}
+                    ${kpi('Médiane', s.median_score!=null ? s.median_score+'/20' : '—')}
+                    ${kpi('Min', s.min_score!=null ? s.min_score+'/20' : '—', '#ef4444')}
+                    ${kpi('Max', s.max_score!=null ? s.max_score+'/20' : '—', '#10b981')}
+                    ${kpi('Taux réussite', s.pass_rate!=null ? s.pass_rate+'%' : '—', s.pass_rate>=50?'#10b981':'#ef4444')}
+                </div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;">
+                    ${kpi('Durée moy.', s.avg_duration_min ? s.avg_duration_min+' min' : '—')}
+                    ${kpi('Risque moy.', s.avg_risk+'%', s.avg_risk>=40?'#f59e0b':'#10b981')}
+                    ${kpi('Haut risque', s.high_risk_count, s.high_risk_count>0?'#ef4444':'#10b981')}
+                    ${kpi('Sig. pré', s.pre_sig_rate+'%', '#6366f1')}
+                </div>
+                <div style="font-size:12px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Distribution des notes</div>
+                <table style="width:100%;">${distRows}</table>
+                <div style="margin-top:20px;text-align:right;">
+                    <button class="btn btn-secondary btn-sm" onclick="closeModal()">Fermer</button>
+                    <button class="btn btn-primary btn-sm" onclick="closeModal();exportExamCSV(${examId},'${(s.exam_title||'').replace(/'/g,'')}')" style="margin-left:8px;">
+                        <i class="fas fa-file-csv"></i> Export CSV
+                    </button>
+                </div>
+            </div>`, '680px');
+    } catch(e) {
+        showAlert('Erreur statistiques : ' + (e.serverMessage || e.message), 'error');
+    } finally { showLoader(false); }
+}
+
+// ============================================================================
+// CORRECTION MANUELLE
+// ============================================================================
+
+async function showManualGradingModal(attemptId, studentName, currentScore) {
+    const scoreVal = currentScore !== null && currentScore !== undefined ? currentScore : '';
+    showModal(`
+        <div style="max-width:460px;">
+            <h2 style="margin:0 0 4px;font-size:16px;"><i class="fas fa-pen" style="color:#6366f1;margin-right:8px;"></i>Correction manuelle</h2>
+            <p style="color:#64748b;font-size:13px;margin:0 0 18px;">${studentName||'Étudiant'}</p>
+            <label style="font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Note /20 <span style="color:#ef4444;">*</span></label>
+            <input id="manual-score" type="number" min="0" max="20" step="0.25" value="${scoreVal}"
+                style="width:100%;padding:10px;border:2px solid #e2e8f0;border-radius:8px;font-size:15px;margin-bottom:14px;outline:none;box-sizing:border-box;"
+                placeholder="Ex : 14.5">
+            <label style="font-size:12px;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Commentaire / feedback</label>
+            <textarea id="manual-feedback" rows="4"
+                style="width:100%;padding:10px;border:2px solid #e2e8f0;border-radius:8px;font-size:13px;resize:vertical;box-sizing:border-box;outline:none;"
+                placeholder="Points forts, points faibles, conseils…"></textarea>
+            <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end;">
+                <button class="btn btn-secondary btn-sm" onclick="closeModal()">Annuler</button>
+                <button class="btn btn-success btn-sm" onclick="submitManualGrade(${attemptId})">
+                    <i class="fas fa-save"></i> Enregistrer la note
+                </button>
+            </div>
+        </div>`, '500px');
+    setTimeout(() => document.getElementById('manual-score')?.focus(), 100);
+}
+
+async function submitManualGrade(attemptId) {
+    const scoreEl    = document.getElementById('manual-score');
+    const feedbackEl = document.getElementById('manual-feedback');
+    const score      = parseFloat(scoreEl?.value);
+    if (isNaN(score) || score < 0 || score > 20) {
+        showAlert('Veuillez saisir une note valide entre 0 et 20.', 'error'); return;
+    }
+    try {
+        await authenticatedFetch(`/api/exam_attempts/${attemptId}/manual-grade`, {
+            method: 'PUT',
+            body: JSON.stringify({ score, feedback: feedbackEl?.value || '' })
+        });
+        closeModal();
+        showAlert(`Note ${score}/20 enregistrée avec succès.`, 'success');
+        // Rafraîchir la liste
+        const examId = window._currentViewedExamId;
+        if (examId) setTimeout(() => viewExamSubmissions(examId), 600);
+    } catch(e) { showAlert(e.serverMessage || e.message || 'Erreur lors de l\'enregistrement.', 'error'); }
+}
+
+// ============================================================================
+// HISTORIQUE EXAMENS ÉTUDIANT
+// ============================================================================
+
+async function showStudentExamHistory() {
+    showLoader(true);
+    try {
+        const resp = await authenticatedFetch('/api/student/exam-history');
+        const d    = await resp.json();
+        const history = d.history || [];
+        const statusBadge = (s) => {
+            const map = {
+                in_progress:   ['#f59e0b', '#fef3c7', 'En cours'],
+                submitted:     ['#6366f1', '#ede9fe', 'Soumis'],
+                auto_submitted:['#8b5cf6', '#ede9fe', 'Auto-soumis'],
+                graded:        ['#10b981', '#d1fae5', 'Corrigé'],
+                banned:        ['#ef4444', '#fee2e2', 'Exclu'],
+            };
+            const [tc, bg, label] = map[s] || ['#64748b','#f1f5f9', s];
+            return `<span style="color:${tc};background:${bg};padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;">${label}</span>`;
+        };
+        const rows = history.length === 0
+            ? '<tr><td colspan="6" style="text-align:center;padding:24px;color:#94a3b8;">Aucun examen passé</td></tr>'
+            : history.map(h => {
+                const score = h.score !== null && h.score !== undefined
+                    ? `<strong style="color:${h.score>=10?'#10b981':'#ef4444'};font-size:14px;">${h.score}/20</strong>`
+                    : '<span style="color:#94a3b8;font-size:11px;">—</span>';
+                const date = h.started_at ? new Date(h.started_at).toLocaleDateString('fr-FR') : '—';
+                const dur  = h.duration_min ? `${h.duration_min} min` : '—';
+                const riskColor = h.risk_score >= 70 ? '#ef4444' : h.risk_score >= 40 ? '#f59e0b' : '#10b981';
+                return `<tr style="border-bottom:1px solid #f1f5f9;">
+                    <td style="padding:10px 12px;font-size:13px;"><strong>${h.exam_title}</strong><br>
+                        <span style="font-size:10px;color:#94a3b8;">${date}</span></td>
+                    <td style="padding:10px 12px;">${statusBadge(h.status)}</td>
+                    <td style="padding:10px 12px;text-align:center;">${score}</td>
+                    <td style="padding:10px 12px;text-align:center;font-size:12px;">${dur}</td>
+                    <td style="padding:10px 12px;text-align:center;">
+                        <span style="color:${riskColor};font-weight:700;font-size:12px;">${h.risk_score}%</span>
+                    </td>
+                    <td style="padding:10px 12px;">
+                        ${h.feedback ? `<button class="btn btn-sm" onclick="showFeedbackModal('${encodeURIComponent(h.exam_title)}','${encodeURIComponent(h.feedback||'')}')"
+                            style="background:#f1f5f9;color:#475569;font-size:11px;padding:4px 10px;">
+                            <i class="fas fa-comment"></i> Feedback
+                        </button>` : '<span style="color:#94a3b8;font-size:11px;">—</span>'}
+                    </td>
+                </tr>`;
+            }).join('');
+        showModal(`
+            <div style="max-width:760px;">
+                <h2 style="margin:0 0 4px;font-size:16px;"><i class="fas fa-history" style="color:#6366f1;margin-right:8px;"></i>Historique de mes examens</h2>
+                <p style="color:#64748b;font-size:12px;margin:0 0 16px;">${history.length} examen(s) au total</p>
+                <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:10px;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead><tr style="background:#f8fafc;">
+                            <th style="padding:9px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Examen</th>
+                            <th style="padding:9px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Statut</th>
+                            <th style="padding:9px 12px;text-align:center;font-size:11px;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Note</th>
+                            <th style="padding:9px 12px;text-align:center;font-size:11px;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Durée</th>
+                            <th style="padding:9px 12px;text-align:center;font-size:11px;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Risque</th>
+                            <th style="padding:9px 12px;font-size:11px;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;"></th>
+                        </tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+                <div style="margin-top:14px;text-align:right;">
+                    <button class="btn btn-secondary btn-sm" onclick="closeModal()">Fermer</button>
+                </div>
+            </div>`, '800px');
+    } catch(e) {
+        showAlert('Erreur chargement historique : ' + (e.serverMessage || e.message), 'error');
+    } finally { showLoader(false); }
+}
+
+function showFeedbackModal(encodedTitle, encodedFeedback) {
+    const title    = decodeURIComponent(encodedTitle);
+    const feedback = decodeURIComponent(encodedFeedback);
+    showModal(`
+        <div style="max-width:520px;">
+            <h2 style="font-size:15px;margin:0 0 4px;"><i class="fas fa-comment" style="color:#6366f1;margin-right:8px;"></i>Feedback — ${title}</h2>
+            <div style="margin-top:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;font-size:13px;line-height:1.6;white-space:pre-wrap;color:#374151;">${feedback}</div>
+            <div style="margin-top:14px;text-align:right;">
+                <button class="btn btn-secondary btn-sm" onclick="closeModal()">Fermer</button>
+            </div>
+        </div>`, '560px');
+}
+
+// ============================================================================
+// DÉTECTION DE PLAGIAT
+// ============================================================================
+
+async function showPlagiarismReport(examId, examTitle) {
+    showLoader(true);
+    try {
+        const resp = await authenticatedFetch(`/api/online_exams/${examId}/plagiarism-check?threshold=0.7`);
+        const d    = await resp.json();
+        const pairs = d.suspicious || [];
+        const levelBadge = (l) => l === 'CRITIQUE'
+            ? `<span style="background:#fee2e2;color:#ef4444;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;">🔴 CRITIQUE</span>`
+            : `<span style="background:#fef3c7;color:#d97706;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;">⚠️ SUSPECT</span>`;
+        const rows = pairs.length === 0
+            ? `<tr><td colspan="4" style="text-align:center;padding:28px;color:#10b981;">
+                <i class="fas fa-shield-check" style="font-size:24px;display:block;margin-bottom:8px;"></i>
+                Aucune similarité suspecte détectée (seuil : ${d.threshold_pct}%)
+               </td></tr>`
+            : pairs.map(p => `<tr style="border-bottom:1px solid #f1f5f9;">
+                <td style="padding:10px 12px;font-size:12px;">
+                    <strong>${p.student1_name}</strong><br>
+                    <span style="color:#94a3b8;font-size:10px;">Tentative #${p.attempt1_id}</span>
+                </td>
+                <td style="padding:10px 12px;font-size:12px;">
+                    <strong>${p.student2_name}</strong><br>
+                    <span style="color:#94a3b8;font-size:10px;">Tentative #${p.attempt2_id}</span>
+                </td>
+                <td style="padding:10px 12px;text-align:center;">
+                    <strong style="font-size:16px;color:${p.similarity>=90?'#ef4444':'#f59e0b'};">${p.similarity}%</strong>
+                </td>
+                <td style="padding:10px 12px;text-align:center;">${levelBadge(p.level)}</td>
+              </tr>`).join('');
+        showModal(`
+            <div style="max-width:700px;">
+                <h2 style="margin:0 0 4px;font-size:16px;"><i class="fas fa-search" style="color:#ef4444;margin-right:8px;"></i>Rapport de plagiat</h2>
+                <p style="color:#64748b;font-size:12px;margin:0 0 4px;">${examTitle||d.exam_title||''}</p>
+                <p style="font-size:11px;color:#94a3b8;margin:0 0 16px;">${d.total_checked} copies analysées · seuil ${d.threshold_pct}% · ${pairs.length} paire(s) suspecte(s)</p>
+                <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:10px;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead><tr style="background:#f8fafc;">
+                            <th style="padding:9px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Étudiant A</th>
+                            <th style="padding:9px 12px;text-align:left;font-size:11px;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Étudiant B</th>
+                            <th style="padding:9px 12px;text-align:center;font-size:11px;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Similarité</th>
+                            <th style="padding:9px 12px;text-align:center;font-size:11px;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Niveau</th>
+                        </tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+                <div style="margin-top:14px;text-align:right;">
+                    <button class="btn btn-secondary btn-sm" onclick="closeModal()">Fermer</button>
+                </div>
+            </div>`, '740px');
+    } catch(e) {
+        showAlert('Erreur analyse plagiat : ' + (e.serverMessage || e.message), 'error');
+    } finally { showLoader(false); }
+}
+
+// ============================================================================
+// RAPPORT D'INTÉGRITÉ PDF
+// ============================================================================
+
+async function downloadIntegrityReport(attemptId, studentName) {
+    showLoader(true);
+    try {
+        const resp = await fetch(`/api/exam_attempts/${attemptId}/integrity-report`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            showAlert(err.error || 'Erreur rapport intégrité.', 'error');
+            return;
+        }
+        const blob = await resp.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = `rapport_integrite_${(studentName||'etudiant').replace(/\s+/g,'_')}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        URL.revokeObjectURL(url);
+        a.remove();
+    } catch(e) {
+        showAlert('Erreur téléchargement rapport : ' + (e.message || ''), 'error');
+    } finally { showLoader(false); }
+}
+
+// ============================================================================
+// RÉCLAMATION — STATUT EN COURS D'EXAMEN (IN_REVIEW)
+// ============================================================================
+
+function reclamStatusLabel(status) {
+    const map = {
+        pending:   { label: '⏳ En attente',       color: '#f59e0b', bg: '#fef3c7' },
+        in_review: { label: '🔍 En cours d\'examen', color: '#3b82f6', bg: '#dbeafe' },
+        resolved:  { label: '✅ Acceptée',          color: '#10b981', bg: '#d1fae5' },
+        rejected:  { label: '❌ Rejetée',           color: '#ef4444', bg: '#fee2e2' },
+    };
+    const m = map[status] || { label: status, color: '#64748b', bg: '#f1f5f9' };
+    return `<span style="background:${m.bg};color:${m.color};padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700;">${m.label}</span>`;
+}
+
+async function setReclamationInReview(reclamationId) {
+    try {
+        await authenticatedFetch(`/api/reclamations/${reclamationId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ status: 'in_review', response: 'Réclamation en cours d\'examen.' })
+        });
+        showAlert('Statut mis à jour : En cours d\'examen.', 'success');
+    } catch(e) { showAlert(e.serverMessage || e.message, 'error'); }
 }
 
 async function saveProfilePassword() {
