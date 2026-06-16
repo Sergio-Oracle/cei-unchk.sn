@@ -2038,7 +2038,8 @@ def agent_mark_read():
     claims = get_jwt()
     if claims.get('role') not in ['professor', 'admin', 'surveillant']:
         return jsonify({'error': 'Accès non autorisé'}), 403
-    ids = set(request.get_json(silent=True) or {}).get('attempt_ids', [])
+    data = request.get_json(silent=True) or {}
+    ids = set(data.get('attempt_ids', []))
     alerts = _load_alerts()
     for a in alerts:
         if a.get('attempt_id') in ids:

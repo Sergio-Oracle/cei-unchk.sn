@@ -6814,14 +6814,17 @@ async function startOnlineExam(examId) {
     showProctoringConsentModal(examId);
 }
 
-async function _doStartOnlineExam(examId, preExamSignature = null) {
+async function _doStartOnlineExam(examId, preExamSignature = null, preExamSignatureMeta = null) {
     showLoader(true);
 
     try {
         // Utiliser fetch directement pour contrôler finement chaque code d'erreur
         const headers = { 'Content-Type': 'application/json' };
         if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-        const body = preExamSignature ? JSON.stringify({ pre_exam_signature: preExamSignature }) : undefined;
+        const payload = {};
+        if (preExamSignature)     payload.pre_exam_signature      = preExamSignature;
+        if (preExamSignatureMeta) payload.pre_exam_signature_meta = preExamSignatureMeta;
+        const body = Object.keys(payload).length > 0 ? JSON.stringify(payload) : undefined;
         const response = await fetch(`/api/online_exams/${examId}/start`, { method: 'POST', headers, body });
         const data = await response.json().catch(() => ({}));
 
@@ -6981,54 +6984,149 @@ function showProctoringConsentModal(examId) {
     requestAnimationFrame(() => _initPreSigPad());
 }
 
+function _drawPreSigWatermark(ctx, w, h) {
+    // Filigrane diagonal central
+    ctx.save();
+    ctx.globalAlpha = 0.06;
+    ctx.font = `bold ${Math.max(14, Math.floor(h / 4))}px Arial`;
+    ctx.fillStyle = '#1e293b';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.translate(w / 2, h / 2);
+    ctx.rotate(-18 * Math.PI / 180);
+    ctx.fillText('CEI — ATTESTATION', 0, 0);
+    ctx.restore();
+
+    // Nom étudiant en haut à gauche (watermark léger)
+    const name = currentUser ? currentUser.full_name.toUpperCase() : '';
+    const dateStr = new Date().toLocaleDateString('fr-FR');
+    ctx.save();
+    ctx.globalAlpha = 0.18;
+    ctx.font = '9px monospace';
+    ctx.fillStyle = '#475569';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(name, 8, 5);
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(dateStr, w - 8, h - 5);
+    ctx.restore();
+
+    // Ligne de base en pointillés
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    ctx.strokeStyle = '#94a3b8';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 6]);
+    const y = h * 0.72;
+    ctx.beginPath(); ctx.moveTo(10, y); ctx.lineTo(w - 10, y); ctx.stroke();
+    ctx.restore();
+}
+
 function _initPreSigPad() {
     const canvas = document.getElementById('pre-sig-canvas');
     if (!canvas) return;
-    // Ajuster la résolution interne du canvas à la taille affichée
     const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width || 480;
-    canvas.height = 120;
+    canvas.width  = Math.round(rect.width) || 480;
+    canvas.height = 130;
     const ctx = canvas.getContext('2d');
+
+    // Dessiner le filigrane non-effaçable
+    _drawPreSigWatermark(ctx, canvas.width, canvas.height);
+
+    // Initialiser le tracker de sécurité
+    canvas._sigMeta = { strokes: 0, pathLength: 0, startTime: null, endTime: null };
+
     let drawing = false, lastX = 0, lastY = 0;
+
     function pos(e) {
         const r = canvas.getBoundingClientRect();
         const src = e.touches ? e.touches[0] : e;
-        return [(src.clientX - r.left) * (canvas.width / r.width),
-                (src.clientY - r.top)  * (canvas.height / r.height)];
+        return [
+            (src.clientX - r.left) * (canvas.width / r.width),
+            (src.clientY - r.top)  * (canvas.height / r.height)
+        ];
     }
-    function start(e) { e.preventDefault(); drawing = true; [lastX, lastY] = pos(e); }
-    function draw(e)  { e.preventDefault(); if (!drawing) return;
+    function start(e) {
+        e.preventDefault();
+        drawing = true;
+        [lastX, lastY] = pos(e);
+        if (!canvas._sigMeta.startTime) canvas._sigMeta.startTime = Date.now();
+        canvas._sigMeta.strokes++;
+    }
+    function draw(e) {
+        e.preventDefault();
+        if (!drawing) return;
         const [x, y] = pos(e);
         ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(x, y);
-        ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.stroke();
-        [lastX, lastY] = [x, y]; }
+        ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.stroke();
+        const dx = x - lastX, dy = y - lastY;
+        canvas._sigMeta.pathLength += Math.sqrt(dx * dx + dy * dy);
+        canvas._sigMeta.endTime = Date.now();
+        [lastX, lastY] = [x, y];
+    }
     function stop() { drawing = false; }
-    canvas.addEventListener('mousedown', start); canvas.addEventListener('mousemove', draw); canvas.addEventListener('mouseup', stop);
-    canvas.addEventListener('touchstart', start); canvas.addEventListener('touchmove', draw); canvas.addEventListener('touchend', stop);
+
+    canvas.addEventListener('mousedown',  start); canvas.addEventListener('mousemove',  draw); canvas.addEventListener('mouseup',    stop);
+    canvas.addEventListener('touchstart', start); canvas.addEventListener('touchmove',  draw); canvas.addEventListener('touchend',   stop);
+    canvas.addEventListener('mouseleave', stop);
 }
 
 function _clearPreSig() {
-    const c = document.getElementById('pre-sig-canvas');
-    if (c) c.getContext('2d').clearRect(0, 0, c.width, c.height);
+    const canvas = document.getElementById('pre-sig-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Re-dessiner le filigrane après effacement
+    _drawPreSigWatermark(ctx, canvas.width, canvas.height);
+    canvas._sigMeta = { strokes: 0, pathLength: 0, startTime: null, endTime: null };
+    canvas.style.border = '2px solid #e2e8f0';
+    canvas.style.background = '#fafafa';
 }
 
 function _validateAndStartExam(examId) {
     const canvas = document.getElementById('pre-sig-canvas');
     if (!canvas) return;
-    const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
-    const signed = pixels.some(v => v !== 0);
-    if (!signed) {
-        // Mettre en évidence la zone de signature
+
+    const meta     = canvas._sigMeta || {};
+    const strokes  = meta.strokes    || 0;
+    const pathLen  = Math.round(meta.pathLength || 0);
+    const duration = (meta.startTime && meta.endTime) ? (meta.endTime - meta.startTime) : 0;
+
+    // ── Verrou 1 : signature vide ──────────────────────────
+    if (strokes === 0) {
         canvas.style.border = '2px solid #ef4444';
         canvas.style.background = '#fef2f2';
-        const label = canvas.previousElementSibling;
-        if (label) label.style.color = '#ef4444';
-        showAlert('Veuillez signer l\'attestation avant de démarrer l\'examen.', 'error');
+        showAlert('Vous devez signer l\'attestation avant de démarrer l\'examen.', 'error');
         return;
     }
+    // ── Verrou 2 : trop peu de traits (clic unique = suspect) ──
+    if (strokes < 2) {
+        showAlert('Signature insuffisante — tracez une signature complète avec plusieurs traits.', 'error');
+        return;
+    }
+    // ── Verrou 3 : longueur de tracé insuffisante ──────────
+    if (pathLen < 100) {
+        showAlert('Signature trop courte — veuillez tracer votre signature complète.', 'error');
+        return;
+    }
+    // ── Verrou 4 : durée trop courte (signature automatisée) ─
+    if (duration < 800) {
+        showAlert('Signature réalisée trop rapidement — veuillez signer normalement.', 'error');
+        return;
+    }
+
     const signatureData = canvas.toDataURL('image/png');
+    const signatureMeta = {
+        strokes,
+        path_length: pathLen,
+        duration_ms: duration,
+        signed_at: new Date().toISOString()
+    };
+
+    canvas.style.border = '2px solid #10b981';
     closeModal();
-    _doStartOnlineExam(examId, signatureData);
+    _doStartOnlineExam(examId, signatureData, signatureMeta);
 }
 
 async function showExamCompositionInterface(examId, attempt) {
@@ -8778,12 +8876,24 @@ async function viewExamSubmissions(examId) {
             ? `<tr><td colspan="6" style="${tdStyle}text-align:center;color:#94a3b8;">Aucune copie soumise</td></tr>`
             : done.map(a => {
                 const isAuto = a.status === 'auto_submitted';
+                // Signature pré-examen
+                let preMeta = null;
+                try { preMeta = a.pre_exam_signature_meta ? JSON.parse(a.pre_exam_signature_meta) : null; } catch(e) {}
+                const preQuality = preMeta
+                    ? `traits:${preMeta.strokes} dur:${Math.round((preMeta.duration_ms||0)/1000)}s`
+                    : '';
                 const preSign = a.pre_exam_signature_data
-                    ? `<span title="Attestation signée avant l'examen" style="color:#10b981;font-size:11px;"><i class="fas fa-check-circle"></i> Pré</span>`
-                    : `<span title="Pas de signature pré-examen" style="color:#94a3b8;font-size:11px;"><i class="fas fa-times-circle"></i> Pré</span>`;
+                    ? `<button onclick="showSignatureImage('${encodeURIComponent(a.pre_exam_signature_data)}','Attestation pré-examen — ${(a.student_name||'').replace(/'/g,"\\'")}','${preQuality}')"
+                        style="background:rgba(16,185,129,.1);color:#059669;border:1px solid rgba(16,185,129,.3);border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;font-weight:600;" title="Voir la signature pré-examen">
+                        <i class="fas fa-check-circle"></i> Pré ↗
+                      </button>`
+                    : `<span style="color:#94a3b8;font-size:10px;"><i class="fas fa-times-circle"></i> Pré absent</span>`;
                 const postSign = a.signature_data
-                    ? `<span title="Signature de soumission" style="color:#10b981;font-size:11px;"><i class="fas fa-check-circle"></i> Post</span>`
-                    : `<span title="${isAuto ? 'Auto-soumis (pas de signature post)' : 'Pas de signature post'}" style="color:${isAuto ? '#f59e0b' : '#94a3b8'};font-size:11px;"><i class="fas fa-${isAuto ? 'clock' : 'times-circle'}"></i> Post</span>`;
+                    ? `<button onclick="showSignatureImage('${encodeURIComponent(a.signature_data)}','Signature de soumission — ${(a.student_name||'').replace(/'/g,"\\'")}','')"
+                        style="background:rgba(99,102,241,.1);color:#6366f1;border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;font-weight:600;" title="Voir la signature post-examen">
+                        <i class="fas fa-check-circle"></i> Post ↗
+                      </button>`
+                    : `<span style="color:${isAuto ? '#f59e0b' : '#94a3b8'};font-size:10px;"><i class="fas fa-${isAuto ? 'clock' : 'times-circle'}"></i> ${isAuto ? 'Auto' : 'Post absent'}</span>`;
                 return `
                 <tr>
                     <td style="${tdStyle}"><strong>${a.student_name||'N/A'}</strong><br><small style="color:#64748b;">${a.student_email||''}</small></td>
@@ -8896,6 +9006,38 @@ async function viewExamSubmissions(examId) {
     } finally {
         showLoader(false);
     }
+}
+
+// ============================================================================
+// VISIONNEUSE DE SIGNATURE
+// ============================================================================
+
+function showSignatureImage(encodedData, title, metaStr) {
+    const data = decodeURIComponent(encodedData);
+    const metaHtml = metaStr ? `
+        <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:10px;">
+            ${metaStr.split(' ').map(part => {
+                const [k, v] = part.split(':');
+                const labels = { traits: 'Traits', dur: 'Durée', lon: 'Longueur' };
+                return `<span style="background:#f1f5f9;padding:3px 10px;border-radius:6px;font-size:12px;color:#475569;">
+                    <strong>${labels[k] || k}</strong> : ${v}
+                </span>`;
+            }).join('')}
+        </div>` : '';
+
+    showModal(`
+        <div style="text-align:center;">
+            <h3 style="margin:0 0 14px;font-size:15px;color:#0f172a;">
+                <i class="fas fa-signature" style="color:#6366f1;margin-right:8px;"></i>${title}
+            </h3>
+            <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;background:#f8fafc;display:inline-block;max-width:100%;">
+                <img src="${data}" alt="Signature" style="display:block;max-width:480px;width:100%;height:auto;">
+            </div>
+            ${metaHtml}
+            <div style="margin-top:16px;">
+                <button class="btn btn-secondary btn-sm" onclick="closeModal()">Fermer</button>
+            </div>
+        </div>`, '560px');
 }
 
 // ============================================================================

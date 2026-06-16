@@ -3825,8 +3825,28 @@ def start_exam_attempt(exam_id):
             return jsonify({'success': True, 'attempt': attempt_dict, 'continuing': True})
         
         # Signature pré-examen transmise par le frontend
+        import json as _json
         body = request.get_json(silent=True) or {}
-        pre_sig = body.get('pre_exam_signature')
+        pre_sig      = body.get('pre_exam_signature')
+        pre_sig_meta = body.get('pre_exam_signature_meta')
+
+        # Validation côté serveur de la qualité de la signature
+        if pre_sig_meta:
+            try:
+                meta = pre_sig_meta if isinstance(pre_sig_meta, dict) else _json.loads(pre_sig_meta)
+                strokes    = int(meta.get('strokes', 0))
+                path_len   = float(meta.get('path_length', 0))
+                duration   = int(meta.get('duration_ms', 0))
+                if strokes < 2 or path_len < 80 or duration < 600:
+                    session.close()
+                    return jsonify({
+                        'error': 'Signature non conforme. Veuillez tracer une signature complète (plusieurs traits, durée suffisante).',
+                        'signature_invalid': True
+                    }), 400
+            except Exception:
+                pass  # meta malformé → on laisse passer, le frontend a déjà validé
+
+        meta_str = _json.dumps(pre_sig_meta) if isinstance(pre_sig_meta, dict) else pre_sig_meta
 
         # Créer nouvelle tentative
         attempt = ExamAttempt(
@@ -3834,7 +3854,8 @@ def start_exam_attempt(exam_id):
             student_id=user_id,
             status=AttemptStatus.IN_PROGRESS,
             answers='{}',
-            pre_exam_signature_data=pre_sig
+            pre_exam_signature_data=pre_sig,
+            pre_exam_signature_meta=meta_str
         )
         session.add(attempt)
         session.flush()  # obtenir attempt.id avant commit

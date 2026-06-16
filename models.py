@@ -495,6 +495,8 @@ class ExamAttempt(Base):
 
     # Signature pré-examen (attestation d'honneur signée avant le timer)
     pre_exam_signature_data = Column(Text)
+    # Métadonnées de la signature pré-examen (JSON: strokes, path_length, duration_ms, signed_at)
+    pre_exam_signature_meta = Column(Text)
     # Signature post-examen (confirmation lors de la soumission manuelle)
     signature_data = Column(Text)
 
