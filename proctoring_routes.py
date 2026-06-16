@@ -2064,20 +2064,24 @@ def agent_get_alerts():
     if unread_attempt_ids:
         session = get_session()
         try:
-            completed_ids = {
-                att.id for att in session.query(ExamAttempt)
-                .filter(ExamAttempt.id.in_(unread_attempt_ids))
-                .filter(ExamAttempt.status != AttemptStatus.IN_PROGRESS)
-                .all()
-            }
+            existing = session.query(ExamAttempt).filter(
+                ExamAttempt.id.in_(unread_attempt_ids)
+            ).all()
+            existing_ids = {att.id for att in existing}
+            # Marquer comme lues : (1) étudiants qui ne sont plus en cours
+            # et (2) attempt_id inconnu en DB (alertes orphelines/obsolètes)
+            stale_ids = (
+                {att.id for att in existing if att.status != AttemptStatus.IN_PROGRESS}
+                | (set(unread_attempt_ids) - existing_ids)
+            )
         except Exception:
-            completed_ids = set()
+            stale_ids = set()
         finally:
             session.close()
-        if completed_ids:
+        if stale_ids:
             changed = False
             for a in alerts:
-                if not a.get('read') and a.get('attempt_id') in completed_ids:
+                if not a.get('read') and a.get('attempt_id') in stale_ids:
                     a['read'] = True
                     changed = True
             if changed:

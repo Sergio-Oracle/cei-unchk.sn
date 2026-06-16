@@ -193,7 +193,7 @@ def _process_exam(exam: dict):
         att_id  = a.get("id")
         status  = a.get("status", "")
 
-        if risk < RISK_ALERT or status in ("banned", "graded", "submitted"):
+        if risk < RISK_ALERT or status in ("banned", "graded", "submitted", "auto_submitted"):
             continue
 
         last_alert = _alert_cooldown.get(att_id, 0)
