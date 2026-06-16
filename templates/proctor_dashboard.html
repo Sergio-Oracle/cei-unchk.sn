@@ -1099,15 +1099,14 @@ async function loadData() {
     document.getElementById('exam-title').textContent = data.exam_title || 'Examen';
 
     updateStats();
-    if (myRole === 'surveillant') {
-        renderGrid();
-        renderCompletedPanel();
-    } else {
+    // Grille caméra : toujours rendue (enseignant voit tous les groupes, surveillant voit le sien)
+    renderGrid();
+    renderCompletedPanel();
+    // Table de gestion : enseignant seulement
+    if (myRole !== 'surveillant') {
         renderTeacherView();
+        renderProctorsPanel();
     }
-
-    // Panneau surveillants (enseignant seulement)
-    if (myRole !== 'surveillant') renderProctorsPanel();
 
     // Titre dynamique selon le rôle
     const examStatus = data.exam_status || '?';
@@ -1147,16 +1146,13 @@ function applyRoleUI() {
     const pp = document.getElementById('proctors-panel');
     if (pp) pp.style.display = isSurveillant ? 'none' : 'block';
 
-    // Bascule vue principale : enseignant ↔ surveillant
-    const teacherView      = document.getElementById('teacher-view');
-    const surveillanceView = document.getElementById('surveillance-view');
-    if (isSurveillant) {
-        if (teacherView)      teacherView.style.display      = 'none';
-        if (surveillanceView) surveillanceView.style.display = '';
-    } else {
-        if (teacherView)      teacherView.style.display      = '';
-        if (surveillanceView) surveillanceView.style.display = 'none';
-        // Pills enseignant dans le header
+    // Panneau gestion enseignant : visible seulement pour prof/admin
+    // La grille caméra (#surveillance-view) reste TOUJOURS visible pour les deux rôles
+    const teacherView = document.getElementById('teacher-view');
+    if (teacherView) teacherView.style.display = isSurveillant ? 'none' : '';
+
+    // Pills enseignant dans le header (terminés + note moy.)
+    if (!isSurveillant) {
         ['stat-submitted-pill', 'stat-avgscore-pill'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.style.display = '';
