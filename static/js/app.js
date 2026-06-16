@@ -403,7 +403,7 @@ function showApp() {
     loadNavigation();
     initSidebar();
     loadDashboard();
-    if (currentUser.role === 'student') startNotifPolling();
+    startNotifPolling();
     // Rechargement complet quand la langue change
     const _origSetLang = window.setLang;
     window.setLang = function(code) {
@@ -538,7 +538,7 @@ function _saveReadSet(set) {
 }
 
 async function fetchNotifications() {
-    if (!currentUser || currentUser.role !== 'student') return;
+    if (!currentUser) return;
     try {
         const data = await apiCall('/api/notifications');
         _notifData = data.notifications || [];
@@ -8927,6 +8927,14 @@ async function viewExamSubmissions(examId) {
                                 style="background:#fef3c7;color:#d97706;font-size:10px;padding:4px 8px;" title="Rapport intégrité PDF">
                                 <i class="fas fa-file-pdf"></i>
                             </button>
+                            <button class="btn btn-sm" onclick="grantExtraTime(${a.id},'${(a.student_name||'').replace(/'/g,"\\'")}') "
+                                style="background:#dcfce7;color:#16a34a;font-size:10px;padding:4px 8px;" title="Accorder du temps supplémentaire">
+                                <i class="fas fa-clock"></i>+
+                            </button>
+                            <button class="btn btn-sm" onclick="addProctorNote(${a.id},'${(a.student_name||'').replace(/'/g,"\\'")}') "
+                                style="background:#e0f2fe;color:#0284c7;font-size:10px;padding:4px 8px;" title="Note de surveillance">
+                                <i class="fas fa-sticky-note"></i>
+                            </button>
                         </div>
                     </td>
                 </tr>`;
@@ -8976,6 +8984,10 @@ async function viewExamSubmissions(examId) {
                     <button class="btn btn-sm" onclick="showPlagiarismReport(${examId},'${(exam.title||'').replace(/'/g,'').replace(/"/g,'')}')"
                         style="background:#fee2e2;color:#ef4444;font-size:12px;padding:6px 12px;">
                         <i class="fas fa-search"></i> Plagiat
+                    </button>
+                    <button class="btn btn-sm" onclick="showExamQRCode(${examId},'${(exam.title||'').replace(/'/g,'').replace(/"/g,'')}')"
+                        style="background:#fef3c7;color:#d97706;font-size:12px;padding:6px 12px;">
+                        <i class="fas fa-qrcode"></i> QR Code
                     </button>
                 </div>
             </div>
@@ -11508,3 +11520,86 @@ async function saveProfilePassword() {
         }
     } catch (e) { showAlert('Erreur de connexion.', 'error'); }
 }
+
+// ─── TEMPS SUPPLÉMENTAIRE ─────────────────────────────────────────────────────
+async function grantExtraTime(attemptId, studentName) {
+    const minutes = parseInt(prompt(`Combien de minutes supplémentaires pour ${studentName} ? (1-60)`, '10'), 10);
+    if (!minutes || minutes < 1 || minutes > 60) { showAlert('Valeur invalide (1-60 min).', 'error'); return; }
+    try {
+        const r = await authenticatedFetch(`/api/exam_attempts/${attemptId}/extra-time`, {
+            method: 'PUT',
+            body: JSON.stringify({ minutes })
+        });
+        const d = await r.json();
+        showAlert(`+${d.added} min accordées à ${studentName} (total : ${d.total_extra} min).`, 'success');
+        if (window._currentViewedExamId) viewExamSubmissions(window._currentViewedExamId);
+    } catch (e) { showAlert(e.serverMessage || 'Erreur lors de l\'attribution du temps.', 'error'); }
+}
+
+// ─── NOTES SURVEILLANT ────────────────────────────────────────────────────────
+async function addProctorNote(attemptId, studentName) {
+    const note = prompt(`Note de surveillance pour ${studentName} :`);
+    if (!note || !note.trim()) return;
+    try {
+        await authenticatedFetch(`/api/exam_attempts/${attemptId}/proctor-note`, {
+            method: 'POST',
+            body: JSON.stringify({ note: note.trim() })
+        });
+        showAlert('Note enregistrée.', 'success');
+    } catch (e) { showAlert(e.serverMessage || 'Erreur lors de l\'enregistrement de la note.', 'error'); }
+}
+
+async function viewProctorNotes(attemptId, studentName) {
+    try {
+        const r = await authenticatedFetch(`/api/exam_attempts/${attemptId}/proctor-notes`);
+        const d = await r.json();
+        const notes = d.notes || [];
+        if (!notes.length) { showAlert(`Aucune note de surveillance pour ${studentName}.`, 'info'); return; }
+        const rows = notes.map(n => {
+            const ts = new Date(n.timestamp).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+            return `<tr>
+              <td style="padding:6px 10px;color:#64748b;font-size:12px;white-space:nowrap">${ts}</td>
+              <td style="padding:6px 10px;color:#64748b;font-size:12px">${escapeHtml(n.author || '—')}</td>
+              <td style="padding:6px 10px">${escapeHtml(n.note)}</td>
+            </tr>`;
+        }).join('');
+        const html = `<div style="max-height:380px;overflow-y:auto">
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="background:#f8fafc;font-size:11px;color:#94a3b8;text-transform:uppercase">
+              <th style="padding:6px 10px;text-align:left">Heure</th>
+              <th style="padding:6px 10px;text-align:left">Auteur</th>
+              <th style="padding:6px 10px;text-align:left">Note</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table></div>`;
+        showModal(`Notes — ${studentName}`, html);
+    } catch (e) { showAlert('Erreur lors de la récupération des notes.', 'error'); }
+}
+
+function escapeHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── QR CODE EXAMEN ───────────────────────────────────────────────────────────
+async function showExamQRCode(examId, examTitle) {
+    try {
+        const r = await authenticatedFetch(`/api/online_exams/${examId}/qrcode`);
+        const d = await r.json();
+        const html = `<div style="text-align:center;padding:16px">
+          <p style="color:#64748b;font-size:13px;margin-bottom:12px">Scannez ce QR code pour accéder à l'examen :</p>
+          <img src="data:image/png;base64,${d.qrcode_b64}" alt="QR Code" style="width:220px;height:220px;border:1px solid #e2e8f0;border-radius:8px"/>
+          <p style="margin-top:12px;font-size:11px;color:#94a3b8;word-break:break-all">${d.url || ''}</p>
+          <button onclick="
+            const a=document.createElement('a');
+            a.href='data:image/png;base64,${d.qrcode_b64}';
+            a.download='qrcode-examen-${examId}.png';
+            a.click();
+          " style="margin-top:12px;padding:8px 18px;background:#6366f1;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px">
+            Télécharger
+          </button>
+        </div>`;
+        showModal(`QR Code — ${examTitle}`, html);
+    } catch (e) { showAlert(e.serverMessage || 'Erreur lors de la génération du QR code.', 'error'); }
+}
+

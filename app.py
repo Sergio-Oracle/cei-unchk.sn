@@ -3640,10 +3640,22 @@ def close_online_exam(exam_id):
         # Passer en statut CLOSED
         exam.status = ExamStatus.CLOSED
         session.commit()
-        
-        exam_dict = exam.to_dict()
+
+        exam_dict      = exam.to_dict()
+        prof_email     = user.email
+        prof_name      = user.full_name or user.username
+        exam_id_local  = exam.id
+
         session.close()
-        
+
+        # Envoyer le résumé par email en arrière-plan
+        import threading as _threading
+        _threading.Thread(
+            target=_send_exam_closure_summary,
+            args=(exam_id_local, prof_email, prof_name),
+            daemon=True
+        ).start()
+
         return jsonify({'success': True, 'exam': exam_dict})
     except Exception as e:
         print(f"❌ Erreur close_online_exam: {e}")
@@ -6199,6 +6211,213 @@ def mark_notifications_read():
         return jsonify({'error': str(e)}), 500
     finally:
         session.close()
+
+
+# ============================================================================
+# TEMPS SUPPLÉMENTAIRE INDIVIDUEL
+# ============================================================================
+
+@app.route('/api/exam_attempts/<int:attempt_id>/extra-time', methods=['PUT'])
+@jwt_required()
+def grant_extra_time(attempt_id):
+    """Accorded des minutes supplémentaires à un étudiant pendant l'examen."""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        claims  = get_jwt()
+        if claims.get('role') not in ['professor', 'admin', 'surveillant']:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        attempt = session.query(ExamAttempt).filter_by(id=attempt_id).first()
+        if not attempt:
+            session.close()
+            return jsonify({'error': 'Tentative non trouvée'}), 404
+        data = request.get_json(silent=True) or {}
+        minutes = int(data.get('minutes', 0))
+        if not (1 <= minutes <= 60):
+            session.close()
+            return jsonify({'error': 'Valeur entre 1 et 60 minutes'}), 400
+        attempt.extra_minutes = (attempt.extra_minutes or 0) + minutes
+        session.commit()
+        total = attempt.extra_minutes
+        student_name = attempt.student.full_name if attempt.student else '?'
+        session.close()
+        print(f"⏱ Temps +{minutes}min accordé à {student_name} (tentative {attempt_id}), total extra: {total}min")
+        return jsonify({'success': True, 'extra_minutes': total, 'added': minutes})
+    except Exception as e:
+        print(f"❌ grant_extra_time {attempt_id}: {e}")
+        try: session.close()
+        except: pass
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# NOTES DE SURVEILLANT SUR UN ÉTUDIANT
+# ============================================================================
+
+@app.route('/api/exam_attempts/<int:attempt_id>/proctor-note', methods=['POST'])
+@jwt_required()
+def add_proctor_note(attempt_id):
+    """Ajoute une note textuelle du surveillant/prof sur une tentative (stockée en activity_log)."""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        claims  = get_jwt()
+        if claims.get('role') not in ['professor', 'admin', 'surveillant']:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        attempt = session.query(ExamAttempt).filter_by(id=attempt_id).first()
+        if not attempt:
+            session.close()
+            return jsonify({'error': 'Tentative non trouvée'}), 404
+        data = request.get_json(silent=True) or {}
+        note = (data.get('note') or '').strip()
+        if not note:
+            session.close()
+            return jsonify({'error': 'Note vide'}), 400
+        author = session.query(User).filter_by(id=user_id).first()
+        author_name = author.full_name if author else f'User#{user_id}'
+        log = ExamActivityLog(
+            attempt_id  = attempt_id,
+            event_type  = 'proctor_note',
+            event_data  = json.dumps({'note': note, 'author': author_name, 'author_id': user_id}, ensure_ascii=False),
+            timestamp   = utcnow(),
+        )
+        session.add(log)
+        session.commit()
+        session.close()
+        return jsonify({'success': True, 'note': note, 'author': author_name})
+    except Exception as e:
+        print(f"❌ add_proctor_note {attempt_id}: {e}")
+        try: session.close()
+        except: pass
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/exam_attempts/<int:attempt_id>/proctor-notes', methods=['GET'])
+@jwt_required()
+def get_proctor_notes(attempt_id):
+    """Liste toutes les notes de surveillance d'une tentative."""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        claims  = get_jwt()
+        if claims.get('role') not in ['professor', 'admin', 'surveillant']:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        logs = session.query(ExamActivityLog).filter_by(
+            attempt_id=attempt_id, event_type='proctor_note'
+        ).order_by(ExamActivityLog.timestamp).all()
+        notes = []
+        for l in logs:
+            try:   d = json.loads(l.event_data or '{}')
+            except: d = {}
+            notes.append({
+                'id':        l.id,
+                'note':      d.get('note', ''),
+                'author':    d.get('author', '?'),
+                'author_id': d.get('author_id'),
+                'timestamp': l.timestamp.isoformat() if l.timestamp else None,
+            })
+        session.close()
+        return jsonify({'notes': notes, 'total': len(notes)})
+    except Exception as e:
+        print(f"❌ get_proctor_notes {attempt_id}: {e}")
+        try: session.close()
+        except: pass
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# QR CODE D'ACCÈS À L'EXAMEN
+# ============================================================================
+
+@app.route('/api/online_exams/<int:exam_id>/qrcode', methods=['GET'])
+@jwt_required()
+def get_exam_qrcode(exam_id):
+    """Génère et retourne un QR code (PNG base64) pointant vers la page de l'examen."""
+    import qrcode, base64 as _b64
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        claims  = get_jwt()
+        if claims.get('role') not in ['professor', 'admin']:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        exam = session.query(OnlineExam).filter_by(id=exam_id).first()
+        if not exam:
+            session.close()
+            return jsonify({'error': 'Examen non trouvé'}), 404
+        base_url = request.host_url.rstrip('/')
+        exam_url = f"{base_url}/app"
+        session.close()
+        qr = qrcode.QRCode(version=1, box_size=8, border=3,
+                           error_correction=qrcode.constants.ERROR_CORRECT_M)
+        qr.add_data(exam_url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color='#1e293b', back_color='white')
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        b64 = _b64.b64encode(buf.read()).decode()
+        return jsonify({
+            'exam_id':   exam_id,
+            'exam_title': exam.title,
+            'exam_url':  exam_url,
+            'qrcode_b64': f"data:image/png;base64,{b64}",
+        })
+    except Exception as e:
+        print(f"❌ get_exam_qrcode {exam_id}: {e}")
+        try: session.close()
+        except: pass
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# EMAIL RÉCAPITULATIF POST-CLÔTURE (déclenché par close_online_exam)
+# ============================================================================
+
+def _send_exam_closure_summary(exam_id: int, professor_email: str, professor_name: str):
+    """Envoie un email récapitulatif au professeur après clôture de l'examen (thread)."""
+    try:
+        session = get_session()
+        exam = session.query(OnlineExam).filter_by(id=exam_id).first()
+        if not exam:
+            session.close()
+            return
+        attempts  = session.query(ExamAttempt).filter_by(exam_id=exam_id).all()
+        total     = len(attempts)
+        submitted = sum(1 for a in attempts if a.status.value in ('submitted', 'auto_submitted'))
+        banned    = sum(1 for a in attempts if a.status.value == 'banned')
+        scores    = [a.score for a in attempts if a.score is not None]
+        avg       = round(sum(scores)/len(scores), 2) if scores else None
+        high_risk = sum(1 for a in attempts if (a.risk_score or 0) >= 70)
+        exam_title = exam.title
+        session.close()
+
+        from utils import send_email as _send_email
+        subject_line = f"[CEI] Clôture : {exam_title}"
+        html_body = f"""<div style="font-family:sans-serif;max-width:520px;margin:auto;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;">
+  <div style="background:#1e293b;padding:20px 24px;">
+    <h2 style="color:white;margin:0;font-size:16px;">CEI — Clôture d'examen</h2>
+  </div>
+  <div style="padding:24px;">
+    <p>Bonjour <strong>{professor_name}</strong>,</p>
+    <p>L'examen <strong>« {exam_title} »</strong> vient d'être clôturé.</p>
+    <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+      <tr style="background:#f8fafc;"><td style="padding:8px 12px;color:#64748b;font-size:13px;">Inscrits</td><td style="padding:8px 12px;font-weight:700;">{total}</td></tr>
+      <tr><td style="padding:8px 12px;color:#64748b;font-size:13px;">Soumis</td><td style="padding:8px 12px;font-weight:700;color:#6366f1;">{submitted}</td></tr>
+      <tr style="background:#f8fafc;"><td style="padding:8px 12px;color:#64748b;font-size:13px;">Exclus</td><td style="padding:8px 12px;font-weight:700;color:#ef4444;">{banned}</td></tr>
+      <tr><td style="padding:8px 12px;color:#64748b;font-size:13px;">Note moyenne</td><td style="padding:8px 12px;font-weight:700;color:{'#10b981' if avg and avg>=10 else '#ef4444'};">{f'{avg}/20' if avg is not None else '—'}</td></tr>
+      <tr style="background:#f8fafc;"><td style="padding:8px 12px;color:#64748b;font-size:13px;">Haut risque (≥70%)</td><td style="padding:8px 12px;font-weight:700;color:#f59e0b;">{high_risk}</td></tr>
+    </table>
+    <p style="font-size:13px;color:#64748b;">Connectez-vous à la plateforme CEI pour corriger les copies et consulter les rapports d'intégrité.</p>
+  </div>
+</div>"""
+        _send_email(professor_email, subject_line, html_body)
+        print(f"📧 Email clôture envoyé à {professor_email} pour exam#{exam_id}")
+    except Exception as e:
+        print(f"⚠️  Email clôture exam#{exam_id}: {e}")
 
 
 if __name__ == '__main__':

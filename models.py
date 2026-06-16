@@ -501,6 +501,9 @@ class ExamAttempt(Base):
     # Signature post-examen (confirmation lors de la soumission manuelle)
     signature_data = Column(Text)
 
+    # Temps supplémentaire accordé individuellement par le prof/surveillant
+    extra_minutes = Column(Integer, default=0)
+
     # Réponses (JSON ou texte selon format)
     answers = Column(Text)  # JSON stockant les réponses
     
@@ -538,7 +541,8 @@ class ExamAttempt(Base):
             'feedback': self.feedback,
             'corrected_at': self.corrected_at.isoformat() if self.corrected_at else None,
             'corrector_name': self.corrector.full_name if self.corrector else None,
-            'signature_data': self.signature_data
+            'signature_data': self.signature_data,
+            'extra_minutes': self.extra_minutes or 0,
         }
 
 class ExamActivityLog(Base):

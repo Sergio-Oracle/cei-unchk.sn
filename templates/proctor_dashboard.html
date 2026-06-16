@@ -1833,6 +1833,38 @@ async function initLiveKit() {
             }
         });
 
+        // ── Reconnexion automatique ─────────────────────────────────────────────
+        let _reconnectTimer = null;
+
+        room.on(LivekitClient.RoomEvent.Disconnected, () => {
+            console.warn('⚠️ LiveKit déconnecté — tentative de reconnexion...');
+            _showLivekitBanner('Connexion perdue — reconnexion en cours...', '#ef4444');
+            clearTimeout(_reconnectTimer);
+            _reconnectTimer = setTimeout(async () => {
+                try {
+                    const res = await fetch(`/api/online_exams/${currentExamId}/livekit-token`, {
+                        headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+                    });
+                    if (!res.ok) throw new Error('token fetch failed');
+                    const newToken = await res.json();
+                    await room.connect(newToken.ws_url, newToken.token);
+                } catch (err) {
+                    console.error('❌ Reconnexion LiveKit échouée :', err);
+                    _showLivekitBanner('Reconnexion impossible — rechargez la page.', '#ef4444', true);
+                }
+            }, 3000);
+        });
+
+        room.on(LivekitClient.RoomEvent.Reconnecting, () => {
+            _showLivekitBanner('Reconnexion en cours...', '#f59e0b');
+        });
+
+        room.on(LivekitClient.RoomEvent.Reconnected, () => {
+            clearTimeout(_reconnectTimer);
+            _hideLivekitBanner();
+            toast('✅ Connexion LiveKit rétablie', 'success');
+        });
+
         await room.connect(tokenData.ws_url, tokenData.token);
         console.log('✅ LiveKit connecté, rôle:', myRole);
 
@@ -3084,6 +3116,30 @@ async function fetchAgentStatusCard() {
 // Mettre à jour la carte agent toutes les 30s (même intervalle que l'agent)
 setInterval(fetchAgentStatusCard, 30000);
 setTimeout(fetchAgentStatusCard, 800);  // Premier appel rapide au chargement
+
+// ── Bandeau LiveKit ──────────────────────────────────────────────────────────
+function _showLivekitBanner(msg, color, permanent = false) {
+    let banner = document.getElementById('livekit-reconnect-banner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'livekit-reconnect-banner';
+        banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;padding:10px 20px;text-align:center;font-size:13px;font-weight:600;color:white;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.3);';
+        document.body.prepend(banner);
+    }
+    banner.style.background = color;
+    banner.innerHTML = `<i class="fas fa-${permanent ? 'exclamation-triangle' : 'circle-notch fa-spin'}"></i> ${msg}`;
+    if (permanent) {
+        const btn = document.createElement('button');
+        btn.textContent = 'Recharger';
+        btn.style.cssText = 'margin-left:14px;padding:4px 12px;background:rgba(255,255,255,.25);border:1px solid rgba(255,255,255,.5);border-radius:5px;color:white;cursor:pointer;font-size:12px;';
+        btn.onclick = () => location.reload();
+        banner.appendChild(btn);
+    }
+}
+function _hideLivekitBanner() {
+    const b = document.getElementById('livekit-reconnect-banner');
+    if (b) b.remove();
+}
 </script>
 <script src="{{ url_for('static', filename='js/site_translator.js') }}?v=7"></script>
 </body>
