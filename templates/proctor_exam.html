@@ -1251,8 +1251,42 @@ async function initLiveKit() {
     try {
         room = new LivekitClient.Room({ adaptiveStream: true, dynacast: true });
 
+        let _reconnectAttempts = 0;
+        const _MAX_RECONNECT = 5;
+        let _reconnectTimer = null;
+
         room.on(LivekitClient.RoomEvent.Disconnected, () => {
-            console.log('LiveKit déconnecté');
+            console.warn('⚠️ LiveKit déconnecté');
+            if (_reconnectAttempts >= _MAX_RECONNECT) {
+                console.error('❌ Reconnexion abandonnée après', _MAX_RECONNECT, 'tentatives');
+                return;
+            }
+            const delay = Math.min(2000 * Math.pow(1.5, _reconnectAttempts), 30000);
+            _reconnectAttempts++;
+            console.log(`🔄 Reconnexion LiveKit dans ${Math.round(delay/1000)}s (tentative ${_reconnectAttempts})`);
+            clearTimeout(_reconnectTimer);
+            _reconnectTimer = setTimeout(async () => {
+                try {
+                    const res = await api(`/api/exam_attempts/${ATTEMPT_ID}/livekit_token`);
+                    if (!res.ok) throw new Error('token');
+                    const tk = await res.json();
+                    await room.connect(tk.ws_url, tk.token);
+                    _reconnectAttempts = 0;
+                    console.log('✅ LiveKit reconnecté');
+                } catch (e) {
+                    console.error('❌ Échec reconnexion:', e);
+                }
+            }, delay);
+        });
+
+        room.on(LivekitClient.RoomEvent.Reconnecting, () => {
+            console.log('🔄 LiveKit reconnexion native...');
+        });
+
+        room.on(LivekitClient.RoomEvent.Reconnected, () => {
+            _reconnectAttempts = 0;
+            clearTimeout(_reconnectTimer);
+            console.log('✅ LiveKit rétabli (natif)');
         });
 
         room.on(LivekitClient.RoomEvent.DataReceived, (payload) => {

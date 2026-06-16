@@ -6119,7 +6119,7 @@ def admin_security_report():
 def get_notifications():
     """Return unseen corrected exams and papers for the current student."""
     user_id = int(get_jwt_identity())
-    session = Session()
+    session = get_session()
     try:
         user = session.query(User).get(user_id)
         if not user or user.role != UserRole.STUDENT:
@@ -6198,7 +6198,7 @@ def get_notifications():
 def mark_notifications_read():
     """Marquer toutes les notifications comme lues (persiste en base)."""
     user_id = int(get_jwt_identity())
-    session = Session()
+    session = get_session()
     try:
         user = session.query(User).get(user_id)
         if not user:
@@ -6232,6 +6232,15 @@ def grant_extra_time(attempt_id):
         if not attempt:
             session.close()
             return jsonify({'error': 'Tentative non trouvée'}), 404
+        # Refuser si l'étudiant a déjà terminé
+        if attempt.status != AttemptStatus.IN_PROGRESS:
+            session.close()
+            return jsonify({'error': 'L\'étudiant a déjà terminé ou été exclu — impossible d\'accorder du temps'}), 400
+        # Refuser si l'examen est clôturé
+        exam = session.query(OnlineExam).filter_by(id=attempt.exam_id).first()
+        if exam and exam.status != ExamStatus.ACTIVE:
+            session.close()
+            return jsonify({'error': 'L\'examen est clôturé — impossible d\'accorder du temps'}), 400
         data = request.get_json(silent=True) or {}
         minutes = int(data.get('minutes', 0))
         if not (1 <= minutes <= 60):

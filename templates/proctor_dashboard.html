@@ -1717,6 +1717,14 @@ function buildCardHTML(student) {
                     onclick="startPrivateCall(${student.attempt_id},'${student.student_name}')" title="Appel audio/vidéo privé avec cet étudiant">
                     <i class="fas fa-phone"></i>
                 </button>
+                <button class="btn btn-sm" onclick="openExtraTimeModal(${student.attempt_id},'${student.student_name.replace(/'/g,"\\'")}')"
+                    style="background:rgba(245,158,11,.15);color:#d97706;border:1px solid rgba(245,158,11,.3)" title="Accorder du temps supplémentaire">
+                    <i class="fas fa-clock"></i>
+                </button>
+                <button class="btn btn-sm" onclick="openProctorNoteModal(${student.attempt_id},'${student.student_name.replace(/'/g,"\\'")}')"
+                    style="background:rgba(99,102,241,.15);color:#6366f1;border:1px solid rgba(99,102,241,.3)" title="Ajouter une note de surveillance">
+                    <i class="fas fa-sticky-note"></i>
+                </button>
                 <button class="btn btn-light btn-sm" onclick="openSidePanel(${student.attempt_id})" style="margin-left:auto" title="Voir les logs">
                     <i class="fas fa-list"></i>
                 </button>
@@ -3139,6 +3147,109 @@ function _showLivekitBanner(msg, color, permanent = false) {
 function _hideLivekitBanner() {
     const b = document.getElementById('livekit-reconnect-banner');
     if (b) b.remove();
+}
+
+// ── TEMPS SUPPLÉMENTAIRE ────────────────────────────────────────────────────
+function openExtraTimeModal(attemptId, studentName) {
+    const existing = document.getElementById('modal-extra-time');
+    if (existing) existing.remove();
+    const m = document.createElement('div');
+    m.id = 'modal-extra-time';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center';
+    m.innerHTML = `
+        <div style="background:#fff;border-radius:12px;padding:28px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+            <h3 style="margin:0 0 16px;font-size:16px;color:#1e293b"><i class="fas fa-clock" style="color:#d97706;margin-right:8px"></i>Temps supplémentaire — ${studentName}</h3>
+            <label style="font-size:13px;color:#64748b;display:block;margin-bottom:6px">Minutes à accorder</label>
+            <input id="extra-time-input" type="number" min="1" max="120" value="10"
+                style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:15px;margin-bottom:16px;box-sizing:border-box">
+            <div style="display:flex;gap:10px">
+                <button onclick="submitExtraTime(${attemptId})"
+                    style="flex:1;padding:10px;background:#d97706;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">
+                    <i class="fas fa-check"></i> Confirmer
+                </button>
+                <button onclick="document.getElementById('modal-extra-time').remove()"
+                    style="flex:1;padding:10px;background:#f1f5f9;color:#475569;border:none;border-radius:8px;cursor:pointer;font-size:14px">
+                    Annuler
+                </button>
+            </div>
+        </div>`;
+    document.body.appendChild(m);
+    document.getElementById('extra-time-input').focus();
+}
+
+async function submitExtraTime(attemptId) {
+    const minutes = parseInt(document.getElementById('extra-time-input').value, 10);
+    if (!minutes || minutes < 1 || minutes > 120) { toast('Valeur invalide (1–120 min)', 'error'); return; }
+    try {
+        const r = await api(`/api/exam_attempts/${attemptId}/extra-time`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ minutes })
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Erreur');
+        document.getElementById('modal-extra-time').remove();
+        toast(`✅ ${minutes} min accordées (total: ${d.total_extra_minutes} min)`, 'success');
+    } catch (e) { toast(e.message, 'error'); }
+}
+
+// ── NOTE DE SURVEILLANCE ────────────────────────────────────────────────────
+function openProctorNoteModal(attemptId, studentName) {
+    const existing = document.getElementById('modal-proctor-note');
+    if (existing) existing.remove();
+    const m = document.createElement('div');
+    m.id = 'modal-proctor-note';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center';
+    m.innerHTML = `
+        <div style="background:#fff;border-radius:12px;padding:28px;width:400px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+            <h3 style="margin:0 0 16px;font-size:16px;color:#1e293b"><i class="fas fa-sticky-note" style="color:#6366f1;margin-right:8px"></i>Note de surveillance — ${studentName}</h3>
+            <textarea id="proctor-note-input" rows="4" placeholder="Ex : étudiant consulte ses notes à 10h12, posture suspecte..."
+                style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;resize:vertical;margin-bottom:16px;box-sizing:border-box"></textarea>
+            <div id="proctor-notes-list" style="max-height:140px;overflow-y:auto;margin-bottom:16px;font-size:12px;color:#475569;background:#f8fafc;border-radius:8px;padding:8px 12px;display:none"></div>
+            <div style="display:flex;gap:10px">
+                <button onclick="submitProctorNote(${attemptId})"
+                    style="flex:1;padding:10px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">
+                    <i class="fas fa-save"></i> Enregistrer
+                </button>
+                <button onclick="loadProctorNotes(${attemptId})"
+                    style="padding:10px 14px;background:#f1f5f9;color:#475569;border:none;border-radius:8px;cursor:pointer;font-size:13px">
+                    <i class="fas fa-history"></i>
+                </button>
+                <button onclick="document.getElementById('modal-proctor-note').remove()"
+                    style="padding:10px 14px;background:#f1f5f9;color:#475569;border:none;border-radius:8px;cursor:pointer;font-size:13px">
+                    Annuler
+                </button>
+            </div>
+        </div>`;
+    document.body.appendChild(m);
+    document.getElementById('proctor-note-input').focus();
+}
+
+async function submitProctorNote(attemptId) {
+    const note = document.getElementById('proctor-note-input').value.trim();
+    if (!note) { toast('Note vide', 'error'); return; }
+    try {
+        const r = await api(`/api/exam_attempts/${attemptId}/proctor-note`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ note })
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Erreur');
+        document.getElementById('proctor-note-input').value = '';
+        toast('✅ Note enregistrée', 'success');
+        await loadProctorNotes(attemptId);
+    } catch (e) { toast(e.message, 'error'); }
+}
+
+async function loadProctorNotes(attemptId) {
+    try {
+        const r = await api(`/api/exam_attempts/${attemptId}/proctor-notes`);
+        const d = await r.json();
+        const list = document.getElementById('proctor-notes-list');
+        if (!list) return;
+        if (!d.notes || !d.notes.length) { list.style.display = 'block'; list.innerHTML = '<em>Aucune note</em>'; return; }
+        list.style.display = 'block';
+        list.innerHTML = d.notes.map(n => `<div style="border-bottom:1px solid #e2e8f0;padding:4px 0"><span style="color:#94a3b8">${new Date(n.created_at).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'})}</span> — ${n.details || ''}</div>`).join('');
+    } catch (e) { console.warn('Notes:', e); }
 }
 </script>
 <script src="{{ url_for('static', filename='js/site_translator.js') }}?v=7"></script>
