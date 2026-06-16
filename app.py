@@ -6237,13 +6237,13 @@ def grant_extra_time(attempt_id):
         if not (1 <= minutes <= 60):
             session.close()
             return jsonify({'error': 'Valeur entre 1 et 60 minutes'}), 400
-        attempt.extra_minutes = (attempt.extra_minutes or 0) + minutes
+        prev = attempt.extra_minutes or 0
+        attempt.extra_minutes = prev + minutes
         session.commit()
-        total = attempt.extra_minutes
-        student_name = attempt.student.full_name if attempt.student else '?'
+        total = attempt.extra_minutes  # rechargé automatiquement (session ouverte)
         session.close()
-        print(f"⏱ Temps +{minutes}min accordé à {student_name} (tentative {attempt_id}), total extra: {total}min")
-        return jsonify({'success': True, 'extra_minutes': total, 'added': minutes})
+        print(f"⏱ Temps +{minutes}min accordé (tentative {attempt_id}), total extra: {total}min")
+        return jsonify({'success': True, 'total_extra': total, 'added': minutes})
     except Exception as e:
         print(f"❌ grant_extra_time {attempt_id}: {e}")
         try: session.close()
@@ -6336,8 +6336,8 @@ def get_proctor_notes(attempt_id):
 @jwt_required()
 def get_exam_qrcode(exam_id):
     """Génère et retourne un QR code (PNG base64) pointant vers la page de l'examen."""
-    import qrcode, base64 as _b64
     try:
+        import qrcode as _qrcode, base64 as _b64
         user_id = int(get_jwt_identity())
         session = get_session()
         claims  = get_jwt()
@@ -6348,26 +6348,29 @@ def get_exam_qrcode(exam_id):
         if not exam:
             session.close()
             return jsonify({'error': 'Examen non trouvé'}), 404
-        base_url = request.host_url.rstrip('/')
-        exam_url = f"{base_url}/app"
+        # Récupérer les données AVANT de fermer la session
+        exam_title = exam.title
+        base_url   = request.host_url.rstrip('/')
+        exam_url   = f"{base_url}/app"
         session.close()
-        qr = qrcode.QRCode(version=1, box_size=8, border=3,
-                           error_correction=qrcode.constants.ERROR_CORRECT_M)
+        qr = _qrcode.QRCode(version=1, box_size=8, border=3,
+                             error_correction=_qrcode.constants.ERROR_CORRECT_M)
         qr.add_data(exam_url)
         qr.make(fit=True)
-        img = qr.make_image(fill_color='#1e293b', back_color='white')
+        img = qr.make_image(fill_color='black', back_color='white')
         buf = io.BytesIO()
         img.save(buf, format='PNG')
         buf.seek(0)
         b64 = _b64.b64encode(buf.read()).decode()
         return jsonify({
-            'exam_id':   exam_id,
-            'exam_title': exam.title,
-            'exam_url':  exam_url,
+            'exam_id':    exam_id,
+            'exam_title': exam_title,
+            'url':        exam_url,
             'qrcode_b64': f"data:image/png;base64,{b64}",
         })
     except Exception as e:
-        print(f"❌ get_exam_qrcode {exam_id}: {e}")
+        import traceback
+        print(f"❌ get_exam_qrcode {exam_id}: {e}\n{traceback.format_exc()}")
         try: session.close()
         except: pass
         return jsonify({'error': str(e)}), 500

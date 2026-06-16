@@ -11588,11 +11588,11 @@ async function showExamQRCode(examId, examTitle) {
         const d = await r.json();
         const html = `<div style="text-align:center;padding:16px">
           <p style="color:#64748b;font-size:13px;margin-bottom:12px">Scannez ce QR code pour accéder à l'examen :</p>
-          <img src="data:image/png;base64,${d.qrcode_b64}" alt="QR Code" style="width:220px;height:220px;border:1px solid #e2e8f0;border-radius:8px"/>
+          <img src="${d.qrcode_b64}" alt="QR Code" style="width:220px;height:220px;border:1px solid #e2e8f0;border-radius:8px"/>
           <p style="margin-top:12px;font-size:11px;color:#94a3b8;word-break:break-all">${d.url || ''}</p>
           <button onclick="
             const a=document.createElement('a');
-            a.href='data:image/png;base64,${d.qrcode_b64}';
+            a.href='${d.qrcode_b64}';
             a.download='qrcode-examen-${examId}.png';
             a.click();
           " style="margin-top:12px;padding:8px 18px;background:#6366f1;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px">
