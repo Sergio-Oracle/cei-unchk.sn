@@ -11591,7 +11591,7 @@ async function viewProctorNotes(attemptId, studentName) {
             </tr></thead>
             <tbody>${rows}</tbody>
           </table></div>`;
-        showModal(`Notes — ${studentName}`, html);
+        showModal(html);
     } catch (e) { showAlert('Erreur lors de la récupération des notes.', 'error'); }
 }
 
@@ -11618,7 +11618,7 @@ async function showExamQRCode(examId, examTitle) {
             Télécharger
           </button>
         </div>`;
-        showModal(`QR Code — ${examTitle}`, html);
+        showModal(html);
     } catch (e) { showAlert(e.serverMessage || 'Erreur lors de la génération du QR code.', 'error'); }
 }
 
@@ -11688,7 +11688,7 @@ async function showExamBilan(examId, examTitle) {
                 </button>
             </div>
         </div>`;
-        showModal('', html);
+        showModal(html);
     } catch (e) {
         showAlert(e.message || 'Impossible de charger le bilan.', 'error');
     } finally {
@@ -11740,7 +11740,7 @@ async function startChainCorrection(examId) {
         _chainQueue  = queue;
         _chainIdx    = 0;
         _chainExamId = examId;
-        _renderChainModal();
+        await _renderChainModal();
     } catch (e) { showAlert(e.message, 'error'); }
     finally { showLoader(false); }
 }
@@ -12035,8 +12035,8 @@ async function _calShowExam(examId) {
             <button onclick="closeModal();loadOnlineExams()" style="flex:1;padding:9px;background:#6366f1;color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">
                 <i class="fas fa-external-link-alt"></i> Gérer l'examen
             </button>
-            ${ex.status === 'closed' ? `<button onclick="closeModal();showExamBilan(${examId},'${escHtml(ex.title)}')" style="flex:1;padding:9px;background:#0369a1;color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;"><i class="fas fa-list-alt"></i> Bilan</button>` : ''}
+            ${ex.status === 'closed' ? `<button onclick="closeModal();showExamBilan(${examId},'${(ex.title||"").replace(/'/g,"\\'")}')" style="flex:1;padding:9px;background:#0369a1;color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;"><i class="fas fa-list-alt"></i> Bilan</button>` : ''}
         </div>
     </div>`;
-    showModal('', html);
+    showModal(html);
 }

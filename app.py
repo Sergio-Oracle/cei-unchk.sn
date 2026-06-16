@@ -5108,17 +5108,16 @@ def get_exam_bilan(exam_id):
         attempts = session.query(ExamAttempt).filter_by(exam_id=exam_id).all()
 
         # Compter les notes de surveillance par tentative
-        from models import ProctoringEvent
         note_counts = {}
         if attempts:
             ids = [a.id for a in attempts]
             rows = session.query(
-                ProctoringEvent.attempt_id,
-                sa_func.count(ProctoringEvent.id)
+                ExamActivityLog.attempt_id,
+                sa_func.count(ExamActivityLog.id)
             ).filter(
-                ProctoringEvent.attempt_id.in_(ids),
-                ProctoringEvent.event_type == 'proctor_note'
-            ).group_by(ProctoringEvent.attempt_id).all()
+                ExamActivityLog.attempt_id.in_(ids),
+                ExamActivityLog.event_type == 'proctor_note'
+            ).group_by(ExamActivityLog.attempt_id).all()
             note_counts = {r[0]: r[1] for r in rows}
 
         rows_out = []
@@ -5264,6 +5263,8 @@ def get_exam_bilan_pdf(exam_id):
     except Exception as e:
         import traceback
         print(f"❌ get_exam_bilan_pdf {exam_id}: {e}\n{traceback.format_exc()}")
+        try: session.close()
+        except: pass
         return jsonify({'error': str(e)}), 500
 
 

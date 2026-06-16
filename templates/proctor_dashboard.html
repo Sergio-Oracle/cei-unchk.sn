@@ -3199,7 +3199,7 @@ function openExtraTimeModal(attemptId, studentName) {
         <div style="background:#fff;border-radius:12px;padding:28px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
             <h3 style="margin:0 0 16px;font-size:16px;color:#1e293b"><i class="fas fa-clock" style="color:#d97706;margin-right:8px"></i>Temps supplémentaire — ${studentName}</h3>
             <label style="font-size:13px;color:#64748b;display:block;margin-bottom:6px">Minutes à accorder</label>
-            <input id="extra-time-input" type="number" min="1" max="120" value="10"
+            <input id="extra-time-input" type="number" min="1" max="60" value="10"
                 style="width:100%;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:15px;margin-bottom:16px;box-sizing:border-box">
             <div style="display:flex;gap:10px">
                 <button onclick="submitExtraTime(${attemptId})"
@@ -3218,7 +3218,7 @@ function openExtraTimeModal(attemptId, studentName) {
 
 async function submitExtraTime(attemptId) {
     const minutes = parseInt(document.getElementById('extra-time-input').value, 10);
-    if (!minutes || minutes < 1 || minutes > 120) { toast('Valeur invalide (1–120 min)', 'error'); return; }
+    if (!minutes || minutes < 1 || minutes > 60) { toast('Valeur invalide (1–60 min)', 'error'); return; }
     try {
         const r = await api(`/api/exam_attempts/${attemptId}/extra-time`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -3227,7 +3227,7 @@ async function submitExtraTime(attemptId) {
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || 'Erreur');
         document.getElementById('modal-extra-time').remove();
-        toast(`✅ ${minutes} min accordées (total: ${d.total_extra_minutes} min)`, 'success');
+        toast(`✅ ${minutes} min accordées (total: ${d.total_extra} min)`, 'success');
     } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -3287,7 +3287,7 @@ async function loadProctorNotes(attemptId) {
         if (!list) return;
         if (!d.notes || !d.notes.length) { list.style.display = 'block'; list.innerHTML = '<em>Aucune note</em>'; return; }
         list.style.display = 'block';
-        list.innerHTML = d.notes.map(n => `<div style="border-bottom:1px solid #e2e8f0;padding:4px 0"><span style="color:#94a3b8">${new Date(n.created_at).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'})}</span> — ${n.details || ''}</div>`).join('');
+        list.innerHTML = d.notes.map(n => `<div style="border-bottom:1px solid #e2e8f0;padding:4px 0"><span style="color:#94a3b8">${new Date(n.timestamp).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'})}</span> — ${n.note || ''}</div>`).join('');
     } catch (e) { console.warn('Notes:', e); }
 }
 </script>

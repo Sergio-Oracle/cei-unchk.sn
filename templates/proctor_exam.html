@@ -1111,6 +1111,7 @@ async function init() {
         }
 
         subjectData = await subjectResp.json();
+        _extraMinutes = subjectData.extra_minutes || 0;
         const riskData = riskResp.ok ? await riskResp.json() : {};
 
         riskScore = riskData.risk_score || 0;
@@ -1192,7 +1193,7 @@ function stripBaremeFromContent(content) {
 // TIMER
 // ═══════════════════════════════════════════════════════════
 
-let _extraMinutes = subjectData.extra_minutes || 0;
+let _extraMinutes = 0;
 let _extraPollInterval = null;
 
 async function _pollExtraTime() {
