@@ -2,7 +2,7 @@
 Application Flask - Système de Notation Avancé COMPLET
 Avec CRUD Maquette + Gestion erreurs
 """
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, make_response
 from flask_cors import CORS
 from flask_compress import Compress
 from datetime import datetime, timedelta, timezone
@@ -5150,6 +5150,120 @@ def get_exam_bilan(exam_id):
         print(f"❌ get_exam_bilan {exam_id}: {e}")
         try: session.close()
         except: pass
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/online_exams/<int:exam_id>/bilan/pdf', methods=['GET'])
+@jwt_required()
+def get_exam_bilan_pdf(exam_id):
+    """Génère un PDF du bilan par étudiant avec reportlab."""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT
+
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if not user or user.role not in [UserRole.PROFESSOR, UserRole.ADMIN]:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        exam = session.query(OnlineExam).filter_by(id=exam_id).first()
+        if not exam:
+            session.close()
+            return jsonify({'error': 'Examen non trouvé'}), 404
+
+        attempts = session.query(ExamAttempt).filter_by(exam_id=exam_id).all()
+        exam_title = exam.title
+        generated_at = utcnow().strftime('%d/%m/%Y %H:%M')
+
+        status_labels = {
+            'submitted': 'Soumis', 'auto_submitted': 'Auto-soumis',
+            'in_progress': 'En cours', 'banned': 'Exclu', 'not_started': 'Absent'
+        }
+
+        rows_data = []
+        scores = []
+        for a in sorted(attempts, key=lambda x: (x.student.full_name if x.student else '')):
+            sv = (a.status.value if hasattr(a.status, 'value') else str(a.status)) if a.status else ''
+            dur = None
+            if a.submitted_at and a.started_at:
+                dur = round((a.submitted_at - a.started_at).total_seconds() / 60, 0)
+            rows_data.append({
+                'name':    a.student.full_name if a.student else '—',
+                'status':  status_labels.get(sv, sv),
+                'score':   a.score,
+                'risk':    a.risk_score or 0,
+                'dur':     int(dur) if dur is not None else None,
+                'extra':   a.extra_minutes or 0,
+            })
+            if a.score is not None:
+                scores.append(a.score)
+
+        session.close()
+
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4,
+                                leftMargin=2*cm, rightMargin=2*cm,
+                                topMargin=2*cm, bottomMargin=2*cm)
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle('title', parent=styles['Title'], fontSize=16, spaceAfter=4)
+        sub_style   = ParagraphStyle('sub',   parent=styles['Normal'], fontSize=10, textColor=colors.grey, spaceAfter=12)
+        story = [
+            Paragraph(f"Bilan — {exam_title}", title_style),
+            Paragraph(f"Généré le {generated_at} • {len(rows_data)} participant(s) • Moyenne : {round(sum(scores)/len(scores),2) if scores else '—'}/20", sub_style),
+            Spacer(1, 0.3*cm),
+        ]
+
+        header = ['Étudiant', 'Statut', 'Note /20', 'Risque', 'Durée', 'Extra']
+        table_data = [header]
+        for r in rows_data:
+            table_data.append([
+                r['name'],
+                r['status'],
+                f"{r['score']:.2f}" if r['score'] is not None else '—',
+                f"{r['risk']}%",
+                f"{r['dur']} min" if r['dur'] is not None else '—',
+                f"+{r['extra']} min" if r['extra'] > 0 else '—',
+            ])
+
+        col_widths = [6*cm, 3*cm, 2.5*cm, 2*cm, 2*cm, 2*cm]
+        tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
+
+        ts = TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1e293b')),
+            ('TEXTCOLOR',  (0,0), (-1,0), colors.white),
+            ('FONTNAME',   (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE',   (0,0), (-1,-1), 9),
+            ('ALIGN',      (1,0), (-1,-1), 'CENTER'),
+            ('ALIGN',      (0,0), (0,-1), 'LEFT'),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f8fafc')]),
+            ('GRID',       (0,0), (-1,-1), 0.3, colors.HexColor('#e2e8f0')),
+            ('TOPPADDING', (0,0), (-1,-1), 5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ])
+        # Colorer les notes
+        for i, r in enumerate(rows_data, start=1):
+            if r['score'] is not None:
+                c = colors.HexColor('#059669') if r['score'] >= 10 else colors.HexColor('#dc2626')
+                ts.add('TEXTCOLOR', (2,i), (2,i), c)
+                ts.add('FONTNAME',  (2,i), (2,i), 'Helvetica-Bold')
+        tbl.setStyle(ts)
+        story.append(tbl)
+
+        doc.build(story)
+        buf.seek(0)
+        safe_title = ''.join(c for c in exam_title if c.isalnum() or c in '-_ ')[:40]
+        response = make_response(buf.read())
+        response.headers['Content-Type'] = 'application/pdf'
+        response.headers['Content-Disposition'] = f'attachment; filename="bilan-{safe_title}.pdf"'
+        return response
+    except Exception as e:
+        import traceback
+        print(f"❌ get_exam_bilan_pdf {exam_id}: {e}\n{traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
 
 

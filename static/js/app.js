@@ -692,6 +692,9 @@ function loadNavigation() {
             <button class="nav-tab" onclick="loadExamsHistory()">
                 <i class="fas fa-history"></i> ${t('nav.exam_history')}
             </button>
+            <button class="nav-tab" onclick="loadExamCalendar()">
+                <i class="fas fa-calendar-alt"></i> Calendrier
+            </button>
             <button class="nav-tab" onclick="loadTranscripts()">
                 <i class="fas fa-file-alt"></i> ${t('nav.transcripts')}
             </button>
@@ -8258,6 +8261,10 @@ async function loadExamCorrections() {
                                 <button class="btn btn-success" onclick="correctAllExamAttempts(${exam.id})">
                                     <i class="fas fa-magic"></i> Tout Corriger avec IA
                                 </button>
+                                <button class="btn btn-sm" onclick="startChainCorrection(${exam.id})"
+                                    style="background:#6366f1;color:white;">
+                                    <i class="fas fa-forward"></i> Correction en chaîne
+                                </button>
                             ` : ''}
                             <button class="btn btn-sm" onclick="exportExamResultsCSV(${exam.id}, '${(exam.title||'').replace(/'/g,"\\'")}')"
                                 style="background:#0f766e;color:white;" title="Exporter les résultats en CSV">
@@ -11674,6 +11681,12 @@ async function showExamBilan(examId, examTitle) {
                     <tbody>${rows || '<tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8;">Aucun participant</td></tr>'}</tbody>
                 </table>
             </div>
+            <div style="margin-top:14px;display:flex;justify-content:flex-end;">
+                <button onclick="downloadBilanPDF(${examId},'${(d.exam_title||examTitle||'').replace(/'/g,'')}')"
+                    style="background:#1e293b;color:white;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;">
+                    <i class="fas fa-file-pdf"></i> Télécharger PDF
+                </button>
+            </div>
         </div>`;
         showModal('', html);
     } catch (e) {
@@ -11686,4 +11699,344 @@ async function showExamBilan(examId, examTitle) {
 function escHtml(s) {
     if (!s) return '';
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ============================================================================
+// TÉLÉCHARGEMENT PDF BILAN
+// ============================================================================
+
+async function downloadBilanPDF(examId, examTitle) {
+    try {
+        const token = localStorage.getItem('authToken');
+        const r = await fetch(`/api/online_exams/${examId}/bilan/pdf`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Erreur PDF'); }
+        const blob = await r.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = `bilan-${(examTitle||'examen').replace(/[^a-zA-Z0-9-_ ]/g,'').trim()}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) { showAlert(e.message || 'Erreur lors du téléchargement PDF.', 'error'); }
+}
+
+// ============================================================================
+// CORRECTION EN CHAÎNE
+// ============================================================================
+
+let _chainQueue = [];
+let _chainIdx   = 0;
+let _chainExamId = null;
+
+async function startChainCorrection(examId) {
+    showLoader(true);
+    try {
+        const r = await authenticatedFetch(`/api/online_exams/${examId}/attempts`);
+        const attempts = await r.json();
+        const queue = attempts.filter(a => a.needs_correction || (a.status === 'submitted' || a.status === 'auto_submitted'));
+        if (!queue.length) { showAlert('Aucune copie à corriger pour cet examen.', 'info'); return; }
+        _chainQueue  = queue;
+        _chainIdx    = 0;
+        _chainExamId = examId;
+        _renderChainModal();
+    } catch (e) { showAlert(e.message, 'error'); }
+    finally { showLoader(false); }
+}
+
+async function _renderChainModal() {
+    const existing = document.getElementById('chain-modal');
+    if (existing) existing.remove();
+
+    const attempt = _chainQueue[_chainIdx];
+    if (!attempt) return;
+
+    // Fetch full details for this attempt
+    let answers = '', feedback = '', score = attempt.score, warnings = attempt.warnings_count || 0;
+    try {
+        const r2 = await authenticatedFetch(`/api/exam_attempts/${attempt.id}/result`).catch(() => null);
+        if (r2 && r2.ok) {
+            const d2 = await r2.json();
+            feedback = d2.feedback || '';
+            score    = d2.score !== undefined ? d2.score : score;
+        }
+    } catch (_) {}
+    try {
+        const parsed = JSON.parse(attempt.answers || '{}');
+        answers = parsed.reponse || parsed.content || parsed.answer || parsed.text || attempt.answers || '';
+    } catch { answers = attempt.answers || ''; }
+    answers = (answers || '').trim();
+
+    const scoreColor = score !== null ? (score >= 10 ? '#10b981' : '#ef4444') : '#94a3b8';
+    const m = document.createElement('div');
+    m.id = 'chain-modal';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9998;display:flex;align-items:center;justify-content:center;padding:12px;';
+    m.innerHTML = `
+    <div style="background:#fff;border-radius:16px;width:100%;max-width:780px;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,.3);">
+        <!-- Header -->
+        <div style="padding:16px 22px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <div>
+                <span style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;">Correction en chaîne</span>
+                <h2 style="margin:2px 0 0;font-size:16px;font-weight:700;color:#0f172a;">${escHtml(attempt.student_name)}</h2>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span style="background:#f1f5f9;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;color:#475569;">${_chainIdx+1} / ${_chainQueue.length}</span>
+                ${score !== null ? `<span style="background:${scoreColor}22;color:${scoreColor};padding:4px 12px;border-radius:20px;font-size:13px;font-weight:700;">${score}/20</span>` : ''}
+                ${warnings > 0 ? `<span style="background:#fef3c7;color:#d97706;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;"><i class="fas fa-exclamation-triangle"></i> ${warnings} incident(s)</span>` : ''}
+                <button onclick="document.getElementById('chain-modal').remove()" style="background:none;border:none;font-size:20px;color:#94a3b8;cursor:pointer;line-height:1;">&times;</button>
+            </div>
+        </div>
+        <!-- Body -->
+        <div style="flex:1;overflow-y:auto;padding:18px 22px;display:flex;flex-direction:column;gap:14px;">
+            <div>
+                <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:6px;">Réponse de l'étudiant</div>
+                <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;font-size:13px;color:#334155;line-height:1.7;max-height:220px;overflow-y:auto;white-space:pre-wrap;">${escHtml(answers) || '<em style="color:#94a3b8">Aucune réponse enregistrée</em>'}</div>
+            </div>
+            ${feedback ? `<div>
+                <div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:6px;">Feedback IA</div>
+                <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px;font-size:12px;color:#1e40af;line-height:1.6;max-height:140px;overflow-y:auto;">${feedback.replace(/\n/g,'<br>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')}</div>
+            </div>` : ''}
+            <!-- Saisie manuelle -->
+            <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:14px;">
+                <div style="font-size:11px;font-weight:700;color:#92400e;text-transform:uppercase;margin-bottom:10px;"><i class="fas fa-pen"></i> Correction manuelle</div>
+                <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+                    <div style="flex:0 0 120px;">
+                        <label style="font-size:12px;color:#475569;display:block;margin-bottom:4px;">Note /20</label>
+                        <input id="chain-score" type="number" min="0" max="20" step="0.5" value="${score !== null ? score : ''}" placeholder="—"
+                            style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:15px;font-weight:700;text-align:center;box-sizing:border-box;">
+                    </div>
+                    <div style="flex:1;min-width:200px;">
+                        <label style="font-size:12px;color:#475569;display:block;margin-bottom:4px;">Feedback (optionnel)</label>
+                        <textarea id="chain-feedback" rows="3" placeholder="Commentaire pour l'étudiant…"
+                            style="width:100%;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;resize:vertical;box-sizing:border-box;">${escHtml(feedback)}</textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Footer -->
+        <div style="padding:14px 22px;border-top:1px solid #f1f5f9;display:flex;gap:10px;flex-wrap:wrap;justify-content:space-between;">
+            <div style="display:flex;gap:8px;">
+                <button onclick="_chainNav(-1)" ${_chainIdx === 0 ? 'disabled' : ''}
+                    style="padding:9px 16px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;cursor:pointer;font-size:13px;${_chainIdx===0?'opacity:.4;cursor:not-allowed;':''}">
+                    <i class="fas fa-chevron-left"></i> Précédent
+                </button>
+                <button onclick="_chainNav(1)" ${_chainIdx >= _chainQueue.length-1 ? 'disabled' : ''}
+                    style="padding:9px 16px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;cursor:pointer;font-size:13px;${_chainIdx>=_chainQueue.length-1?'opacity:.4;cursor:not-allowed;':''}">
+                    Suivant <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <button onclick="_chainSaveManual(${attempt.id})"
+                    style="padding:9px 18px;background:#d97706;color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">
+                    <i class="fas fa-save"></i> Enregistrer
+                </button>
+                <button onclick="_chainCorrectAI(${attempt.id})"
+                    style="padding:9px 18px;background:#10b981;color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">
+                    <i class="fas fa-robot"></i> Corriger par IA
+                </button>
+            </div>
+        </div>
+    </div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', e => { if (e.target === m) m.remove(); });
+}
+
+async function _chainNav(dir) {
+    const newIdx = _chainIdx + dir;
+    if (newIdx < 0 || newIdx >= _chainQueue.length) return;
+    _chainIdx = newIdx;
+    await _renderChainModal();
+}
+
+async function _chainSaveManual(attemptId) {
+    const scoreVal = parseFloat(document.getElementById('chain-score').value);
+    const fb = (document.getElementById('chain-feedback').value || '').trim();
+    if (isNaN(scoreVal) || scoreVal < 0 || scoreVal > 20) {
+        showAlert('Note invalide (0–20)', 'error'); return;
+    }
+    try {
+        const r = await authenticatedFetch(`/api/exam_attempts/${attemptId}/manual-grade`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ score: scoreVal, feedback: fb })
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error);
+        // Update queue entry
+        const entry = _chainQueue.find(a => a.id === attemptId);
+        if (entry) { entry.score = scoreVal; entry.needs_correction = false; }
+        showAlert(`✅ Note enregistrée : ${scoreVal}/20`, 'success');
+        if (_chainIdx < _chainQueue.length - 1) {
+            _chainIdx++;
+            await _renderChainModal();
+        } else {
+            document.getElementById('chain-modal')?.remove();
+            showAlert('Toutes les copies ont été corrigées.', 'success');
+        }
+    } catch (e) { showAlert(e.message, 'error'); }
+}
+
+async function _chainCorrectAI(attemptId) {
+    showLoader(true);
+    try {
+        const r = await authenticatedFetch(`/api/exam_attempts/${attemptId}/correct`, { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok || !d.success) throw new Error(d.error || 'Erreur IA');
+        const entry = _chainQueue.find(a => a.id === attemptId);
+        if (entry) { entry.score = d.attempt?.score; entry.needs_correction = false; }
+        showAlert(`✅ IA : ${d.attempt?.score}/20`, 'success');
+        if (_chainIdx < _chainQueue.length - 1) {
+            _chainIdx++;
+            await _renderChainModal();
+        } else {
+            document.getElementById('chain-modal')?.remove();
+            showAlert('Toutes les copies ont été corrigées.', 'success');
+        }
+    } catch (e) { showAlert(e.message, 'error'); }
+    finally { showLoader(false); }
+}
+
+// ============================================================================
+// CALENDRIER GRILLE — PROFESSEUR / ADMIN
+// ============================================================================
+
+let _calYear  = new Date().getFullYear();
+let _calMonth = new Date().getMonth(); // 0-based
+let _calExams = [];
+
+async function loadExamCalendar() {
+    if (window.event && window.event.target) setActiveTab(window.event.target);
+    showLoader(true);
+    try {
+        const r = await authenticatedFetch('/api/online_exams');
+        _calExams = await r.json();
+        _calYear  = new Date().getFullYear();
+        _calMonth = new Date().getMonth();
+        _renderCalendar();
+    } catch (e) { showAlert('Erreur chargement calendrier.', 'error'); }
+    finally { showLoader(false); }
+}
+
+function _renderCalendar() {
+    const monthNames = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+    const dayNames   = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+    const statusColors = { active:'#10b981', scheduled:'#3b82f6', closed:'#94a3b8', draft:'#f59e0b' };
+
+    // Build day→exams map
+    const dayMap = {};
+    _calExams.forEach(ex => {
+        const dt = ex.scheduled_start ? new Date(ex.scheduled_start) : null;
+        if (!dt) return;
+        if (dt.getFullYear() === _calYear && dt.getMonth() === _calMonth) {
+            const d = dt.getDate();
+            if (!dayMap[d]) dayMap[d] = [];
+            dayMap[d].push(ex);
+        }
+    });
+
+    const firstDay = new Date(_calYear, _calMonth, 1).getDay(); // 0=Sun
+    const leadDays = (firstDay + 6) % 7; // Mon-based
+    const daysInMonth = new Date(_calYear, _calMonth + 1, 0).getDate();
+    const today = new Date();
+
+    let cells = '';
+    for (let i = 0; i < leadDays; i++) cells += '<div style="background:#fafafa;border-radius:8px;min-height:80px;"></div>';
+    for (let d = 1; d <= daysInMonth; d++) {
+        const isToday = today.getFullYear() === _calYear && today.getMonth() === _calMonth && today.getDate() === d;
+        const exams   = dayMap[d] || [];
+        const dots = exams.map(ex => {
+            const c = statusColors[ex.status] || '#94a3b8';
+            const safe = escHtml((ex.title||'').replace(/'/g,''));
+            return `<div onclick="event.stopPropagation();_calShowExam(${ex.id})" title="${safe}"
+                style="background:${c};color:white;font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;margin-bottom:2px;cursor:pointer;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:100%;">
+                ${safe}
+            </div>`;
+        }).join('');
+        cells += `
+        <div style="background:${isToday ? '#eff6ff' : '#fff'};border:${isToday ? '2px solid #3b82f6' : '1px solid #f1f5f9'};border-radius:8px;padding:6px 8px;min-height:80px;cursor:default;">
+            <div style="font-size:12px;font-weight:${isToday?'800':'600'};color:${isToday?'#2563eb':'#334155'};margin-bottom:4px;">${d}</div>
+            ${dots}
+        </div>`;
+    }
+    // Fill trailing cells to complete last week
+    const total = leadDays + daysInMonth;
+    const trail = total % 7 === 0 ? 0 : 7 - (total % 7);
+    for (let i = 0; i < trail; i++) cells += '<div style="background:#fafafa;border-radius:8px;min-height:80px;"></div>';
+
+    const upcomingList = _calExams
+        .filter(ex => ex.scheduled_start)
+        .sort((a,b) => new Date(a.scheduled_start) - new Date(b.scheduled_start))
+        .slice(0, 8)
+        .map(ex => {
+            const c = statusColors[ex.status] || '#94a3b8';
+            const dt = new Date(ex.scheduled_start).toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
+            return `<div onclick="_calShowExam(${ex.id})" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                <span style="width:10px;height:10px;background:${c};border-radius:50%;flex-shrink:0;"></span>
+                <span style="flex:1;font-size:13px;color:#0f172a;font-weight:500;">${escHtml(ex.title)}</span>
+                <span style="font-size:11px;color:#94a3b8;">${dt}</span>
+            </div>`;
+        }).join('') || '<p style="color:#94a3b8;font-size:13px;padding:8px 12px;">Aucun examen planifié</p>';
+
+    document.getElementById('main-content').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 260px;gap:20px;align-items:start;">
+        <!-- Calendrier -->
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                <button onclick="_calNav(-1)" style="background:none;border:1px solid #e2e8f0;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:14px;">‹</button>
+                <h2 style="margin:0;font-size:17px;font-weight:700;color:#0f172a;">${monthNames[_calMonth]} ${_calYear}</h2>
+                <button onclick="_calNav(1)"  style="background:none;border:1px solid #e2e8f0;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:14px;">›</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:6px;">
+                ${dayNames.map(d => `<div style="text-align:center;font-size:10px;font-weight:700;color:#94a3b8;text-transform:uppercase;padding:4px 0;">${d}</div>`).join('')}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">${cells}</div>
+            <!-- Légende -->
+            <div style="display:flex;gap:14px;margin-top:12px;flex-wrap:wrap;">
+                ${Object.entries(statusColors).map(([s,c])=>`<span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#64748b;"><span style="width:8px;height:8px;background:${c};border-radius:50%;"></span>${s}</span>`).join('')}
+            </div>
+        </div>
+        <!-- Sidebar liste -->
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:16px;">
+            <h3 style="margin:0 0 12px;font-size:14px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:8px;"><i class="fas fa-list" style="color:#3b82f6;"></i> À venir</h3>
+            ${upcomingList}
+        </div>
+    </div>`;
+}
+
+function _calNav(dir) {
+    _calMonth += dir;
+    if (_calMonth < 0)  { _calMonth = 11; _calYear--; }
+    if (_calMonth > 11) { _calMonth = 0;  _calYear++; }
+    _renderCalendar();
+}
+
+async function _calShowExam(examId) {
+    const ex = _calExams.find(e => e.id === examId);
+    if (!ex) return;
+    const statusColors = { active:'#10b981', scheduled:'#3b82f6', closed:'#94a3b8', draft:'#f59e0b' };
+    const c = statusColors[ex.status] || '#94a3b8';
+    const dt = ex.scheduled_start ? new Date(ex.scheduled_start).toLocaleString('fr-FR',{timeZone:'Africa/Dakar'}) : '—';
+    const html = `
+    <div style="max-width:440px;">
+        <h2 style="margin:0 0 6px;font-size:17px;">${escHtml(ex.title)}</h2>
+        <span style="background:${c}22;color:${c};padding:3px 12px;border-radius:20px;font-size:12px;font-weight:700;">${ex.status}</span>
+        <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div style="background:#f8fafc;border-radius:10px;padding:12px;">
+                <div style="font-size:11px;color:#94a3b8;">Date</div>
+                <div style="font-size:13px;font-weight:600;color:#0f172a;margin-top:2px;">${dt}</div>
+            </div>
+            <div style="background:#f8fafc;border-radius:10px;padding:12px;">
+                <div style="font-size:11px;color:#94a3b8;">Durée</div>
+                <div style="font-size:13px;font-weight:600;color:#0f172a;margin-top:2px;">${ex.duration_minutes || '—'} min</div>
+            </div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;">
+            <button onclick="closeModal();loadOnlineExams()" style="flex:1;padding:9px;background:#6366f1;color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">
+                <i class="fas fa-external-link-alt"></i> Gérer l'examen
+            </button>
+            ${ex.status === 'closed' ? `<button onclick="closeModal();showExamBilan(${examId},'${escHtml(ex.title)}')" style="flex:1;padding:9px;background:#0369a1;color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;"><i class="fas fa-list-alt"></i> Bilan</button>` : ''}
+        </div>
+    </div>`;
+    showModal('', html);
 }
