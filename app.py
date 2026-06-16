@@ -2908,9 +2908,13 @@ def create_reclamation():
             if paper.student_id != user_id:
                 session.close()
                 return jsonify({'error': 'Cette copie ne vous appartient pas'}), 403
-            if paper.reclamation_window_end and paper.reclamation_window_end < utcnow():
-                session.close()
-                return jsonify({'error': 'Période de réclamation expirée (7 jours après correction)'}), 400
+            if paper.reclamation_window_end:
+                rwe = paper.reclamation_window_end
+                if rwe.tzinfo is None:
+                    rwe = rwe.replace(tzinfo=timezone.utc)
+                if rwe < utcnow():
+                    session.close()
+                    return jsonify({'error': 'Période de réclamation expirée (7 jours après correction)'}), 400
             existing = session.query(Reclamation).filter_by(paper_id=paper_id, status=ReclamationStatus.PENDING).first()
             if existing:
                 session.close()
@@ -2927,7 +2931,10 @@ def create_reclamation():
                 session.close()
                 return jsonify({'error': 'La copie n\'a pas encore été corrigée'}), 400
             # Fenêtre de 7 jours depuis la correction
-            if utcnow() > attempt.corrected_at + timedelta(days=7):
+            corrected = attempt.corrected_at
+            if corrected.tzinfo is None:
+                corrected = corrected.replace(tzinfo=timezone.utc)
+            if utcnow() > corrected + timedelta(days=7):
                 session.close()
                 return jsonify({'error': 'Période de réclamation expirée (7 jours après correction)'}), 400
             existing = session.query(Reclamation).filter_by(attempt_id=attempt_id, status=ReclamationStatus.PENDING).first()

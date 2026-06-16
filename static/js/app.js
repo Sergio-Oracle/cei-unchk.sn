@@ -6473,8 +6473,9 @@ async function submitReclamationForAttempt(attemptId) {
         } else {
             showAlert(data.error || 'Erreur lors de la soumission.', 'error');
         }
-    } catch(e) { showAlert('Erreur réseau.', 'error'); }
-    finally { showLoader(false); }
+    } catch(e) {
+        if (!e.alreadyHandled) showAlert(e.serverMessage || e.message || 'Erreur réseau. Vérifiez votre connexion et réessayez.', 'error');
+    } finally { showLoader(false); }
 }
 
 async function viewOnlineExamDetails(examId) {
@@ -7390,26 +7391,50 @@ async function _confirmSignatureAndSubmit() {
 }
 
 async function autoSubmitExam(attemptId) {
+    clearInterval(examAutoSaveInterval);
+    _stopFaceDetection();
+
+    // Afficher un modal de signature même en auto-submit
+    // (signature vide acceptée car le temps est écoulé)
+    const overlay = document.createElement('div');
+    overlay.id = 'signature-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = `
+        <div style="background:#fff;border-radius:16px;padding:28px;width:420px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+            <div style="background:#fef3c7;border:1px solid #d97706;border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;gap:10px;align-items:center;">
+                <i class="fas fa-clock" style="color:#d97706;font-size:20px;flex-shrink:0;"></i>
+                <span style="font-size:13px;color:#92400e;font-weight:600;">Temps écoulé — soumission automatique en cours</span>
+            </div>
+            <h3 style="margin:0 0 6px;font-size:17px;color:#0f172a;"><i class="fas fa-pen-nib" style="color:#6366f1;margin-right:8px;"></i>Signature électronique</h3>
+            <p style="margin:0 0 14px;font-size:13px;color:#64748b;">Signez pour confirmer que vous avez composé cet examen seul. Si vous n'êtes pas en mesure de signer, cliquez directement sur Soumettre.</p>
+            <canvas id="sig-canvas" width="360" height="140" style="border:2px solid #e2e8f0;border-radius:10px;display:block;cursor:crosshair;background:#f8fafc;touch-action:none;"></canvas>
+            <div style="display:flex;gap:8px;margin-top:14px;">
+                <button onclick="_clearSignature()" style="flex:1;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;color:#64748b;cursor:pointer;font-size:13px;"><i class="fas fa-eraser"></i> Effacer</button>
+                <button onclick="_doAutoSubmit(${attemptId})" style="flex:2;padding:10px;border:none;border-radius:8px;background:#6366f1;color:white;cursor:pointer;font-size:13px;font-weight:600;"><i class="fas fa-paper-plane"></i> Soumettre</button>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+    _initSignaturePad();
+}
+
+async function _doAutoSubmit(attemptId) {
+    const canvas = document.getElementById('sig-canvas');
+    const signatureData = canvas ? canvas.toDataURL('image/png') : null;
+    _cancelSignature();
     showLoader(true);
-    
     try {
         const answers = document.getElementById('exam-answers')?.value || '';
-        
         await authenticatedFetch(`/api/exam_attempts/${attemptId}/submit`, {
             method: 'POST',
             body: JSON.stringify({
-                answers: JSON.stringify({ content: answers })
+                answers: JSON.stringify({ content: answers }),
+                signature_data: signatureData
             })
         });
-        
-        clearInterval(examAutoSaveInterval);
-        _stopFaceDetection();
-        showAlert('Examen soumis automatiquement (temps écoulé)', 'info');
-        setTimeout(() => {
-            loadOnlineExams();
-        }, 3000);
+        showAlert('Examen soumis — temps écoulé.', 'info');
+        setTimeout(() => { loadOnlineExams(); }, 2500);
     } catch (error) {
-        console.error('Erreur auto-submit:', error);
+        if (!error.alreadyHandled) showAlert(error.serverMessage || error.message || 'Erreur lors de la soumission automatique.', 'error');
     } finally {
         showLoader(false);
     }
