@@ -8919,7 +8919,7 @@ async function viewExamSubmissions(examId) {
                             ${a.needs_correction
                                 ? `<button class="btn btn-sm btn-primary" onclick="closeModal();correctSingleAttempt(${a.id})" style="font-size:10px;padding:4px 8px;"><i class="fas fa-magic"></i> Corriger</button>`
                                 : `<button class="btn btn-sm" onclick="closeModal();viewAttemptDetails(${a.id})" style="background:#f1f5f9;color:#475569;font-size:10px;padding:4px 8px;"><i class="fas fa-eye"></i> Voir</button>`}
-                            <button class="btn btn-sm" onclick="showManualGradingModal(${a.id},'${(a.student_name||'').replace(/'/g,'\\'')}',${a.score !== null && a.score !== undefined ? a.score : 'null'})"
+                            <button class="btn btn-sm" onclick="showManualGradingModal(${a.id},'${(a.student_name||'').replace(/'/g,"\\'")}',${a.score !== null && a.score !== undefined ? a.score : 'null'})"
                                 style="background:#ede9fe;color:#6366f1;font-size:10px;padding:4px 8px;" title="Correction manuelle">
                                 <i class="fas fa-pen"></i>
                             </button>
