@@ -5543,18 +5543,34 @@ async function showRespondReclamationModal(reclamationId) {
             return;
         }
 
-        // Récupérer les détails de la copie corrigée
-        // ✅ CORRECT
-	const paperResponse = await authenticatedFetch(`/api/papers/detail/${reclamation.paper_id}`);
-        const paper = await paperResponse.json();
+        // Récupérer les détails selon le type : copie papier ou examen en ligne
+        let currentScore = 0;
+        let feedbackHtml = 'Aucun feedback disponible';
+        let viewDetailBtn = '';
+
+        if (reclamation.paper_id) {
+            const paperResponse = await authenticatedFetch(`/api/papers/detail/${reclamation.paper_id}`);
+            const paper = await paperResponse.json();
+            currentScore = paper.score || 0;
+            feedbackHtml = paper.feedback || feedbackHtml;
+            viewDetailBtn = `<button class="btn btn-sm btn-info" onclick="viewPaperDetail(${paper.id})">
+                                <i class="fas fa-eye"></i> Voir la copie complète
+                             </button>`;
+        } else if (reclamation.attempt_id) {
+            const attResp = await authenticatedFetch(`/api/exam_attempts/${reclamation.attempt_id}/review`);
+            const att = await attResp.json();
+            currentScore = att.score || 0;
+            feedbackHtml = att.feedback || feedbackHtml;
+            viewDetailBtn = `<span style="font-size:12px;color:#64748b;"><i class="fas fa-laptop-code"></i> Examen en ligne — ${att.exam_title || ''}</span>`;
+        }
 
         const modalContent = `
             <h2><i class="fas fa-reply"></i> Répondre à la Réclamation</h2>
-            
+
             <div class="alert alert-info" style="margin-bottom: 20px;">
                 <h4><i class="fas fa-info-circle"></i> Détails de la Réclamation</h4>
                 <p><strong>Étudiant:</strong> ${reclamation.student_name}</p>
-                <p><strong>Sujet:</strong> ${reclamation.subject_title}</p>
+                <p><strong>Sujet:</strong> ${reclamation.subject_title || (reclamation.attempt_id ? 'Examen en ligne' : '—')}</p>
                 <p><strong>Date:</strong> ${new Date(reclamation.created_at).toLocaleString('fr-FR')}</p>
                 <p><strong>Raison:</strong></p>
                 <div style="background: white; padding: 10px; border-radius: 4px; margin-top: 8px;">
@@ -5564,23 +5580,19 @@ async function showRespondReclamationModal(reclamationId) {
 
             <div class="card" style="margin-bottom: 20px;">
                 <div class="card-header">
-                    <h4><i class="fas fa-file-alt"></i> Copie Corrigée</h4>
+                    <h4><i class="fas fa-file-alt"></i> Copie ${reclamation.attempt_id ? 'Examen en Ligne' : 'Corrigée'}</h4>
                 </div>
                 <div style="padding: 15px;">
-                    <p><strong>Note actuelle:</strong> <span style="font-size: 24px; color: ${paper.score >= 10 ? '#10b981' : '#ef4444'}; font-weight: bold;">${paper.score}/20</span></p>
-                    
+                    <p><strong>Note actuelle:</strong> <span style="font-size: 24px; color: ${currentScore >= 10 ? '#10b981' : '#ef4444'}; font-weight: bold;">${currentScore}/20</span></p>
+
                     <div style="margin-top: 15px;">
                         <strong><i class="fas fa-comment"></i> Feedback initial:</strong>
                         <div style="background: #f8fafc; padding: 12px; border-radius: 6px; margin-top: 8px; max-height: 200px; overflow-y: auto; white-space: pre-wrap;">
-${paper.feedback || 'Aucun feedback disponible'}
+${feedbackHtml}
                         </div>
                     </div>
 
-                    <div style="margin-top: 15px;">
-                        <button class="btn btn-sm btn-info" onclick="viewPaperDetail(${paper.id})">
-                            <i class="fas fa-eye"></i> Voir la copie complète
-                        </button>
-                    </div>
+                    <div style="margin-top: 15px;">${viewDetailBtn}</div>
                 </div>
             </div>
 
@@ -5608,8 +5620,8 @@ ${paper.feedback || 'Aucun feedback disponible'}
 
                 <div class="form-group" id="new-score-group" style="display: none;">
                     <label><i class="fas fa-star"></i> Nouvelle Note (sur 20)</label>
-                    <input type="number" id="reclamation-new-score" min="0" max="20" step="0.5" value="${paper.score}">
-                    <small class="form-help">Note actuelle: ${paper.score}/20</small>
+                    <input type="number" id="reclamation-new-score" min="0" max="20" step="0.5" value="${currentScore}">
+                    <small class="form-help">Note actuelle: ${currentScore}/20</small>
                 </div>
 
                 <div class="form-group">
