@@ -3379,18 +3379,24 @@ def get_online_exams():
         )
         
         if user.role == UserRole.STUDENT:
-            # Étudiants : examens actifs/planifiés ET examens terminés auxquels ils ont participé
+            # Étudiants : examens actifs/planifiés + examens terminés (participé OU fermés dans les 7 derniers jours)
             active_exams = query.filter(OnlineExam.status.in_([ExamStatus.SCHEDULED, ExamStatus.ACTIVE])).all()
-            participated_ids = [
+            participated_ids = set(
                 a.exam_id for a in session.query(ExamAttempt.exam_id)
                 .filter_by(student_id=user_id).all()
-            ]
-            closed_exams = []
-            if participated_ids:
-                closed_exams = query.filter(
-                    OnlineExam.id.in_(participated_ids),
-                    OnlineExam.status == ExamStatus.CLOSED
+            )
+            recent_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
+            recent_closed_ids = set(
+                r.id for r in session.query(OnlineExam.id).filter(
+                    OnlineExam.status == ExamStatus.CLOSED,
+                    OnlineExam.end_time >= recent_cutoff
                 ).all()
+            )
+            all_closed_ids = participated_ids | recent_closed_ids
+            closed_exams = query.filter(
+                OnlineExam.id.in_(list(all_closed_ids)),
+                OnlineExam.status == ExamStatus.CLOSED
+            ).all() if all_closed_ids else []
             exams = active_exams + closed_exams
         elif user.role == UserRole.PROFESSOR:
             # Professeurs : leurs propres examens
