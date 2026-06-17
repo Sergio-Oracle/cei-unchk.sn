@@ -6869,7 +6869,7 @@ async function _doStartOnlineExam(examId, preExamSignature = null, preExamSignat
                     <i class="fas fa-check"></i> Compris
                 </button></div>`;
 
-            showModal('', html);
+            showModal(html);
             return;
         }
 
