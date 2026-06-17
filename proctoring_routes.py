@@ -1042,13 +1042,43 @@ def get_surveillant_exams():
         exam_proctors = session.query(ExamProctor).filter_by(proctor_id=user_id).all()
         exams = []
         for ep in exam_proctors:
-            if ep.exam:
-                d = ep.exam.to_dict()
-                # Nombre d'étudiants à surveiller
-                d['my_student_count'] = session.query(ProctorAssignment).filter_by(
-                    exam_id=ep.exam_id, proctor_id=user_id
-                ).count()
-                exams.append(d)
+            if not ep.exam:
+                continue
+            d = ep.exam.to_dict()
+
+            # Récupérer les affectations de cet examen pour ce surveillant
+            assignments = session.query(ProctorAssignment).filter_by(
+                exam_id=ep.exam_id, proctor_id=user_id
+            ).all()
+
+            students = []
+            for pa in assignments:
+                s_info = {
+                    'student_id':    pa.student_id,
+                    'student_name':  pa.student.full_name if pa.student else '—',
+                    'student_email': pa.student.email    if pa.student else '—',
+                    'attempt_id':    pa.attempt_id,
+                    'status':        'not_started',
+                    'risk_score':    0,
+                }
+                if pa.attempt:
+                    s_info['attempt_id']  = pa.attempt.id
+                    s_info['status']      = pa.attempt.status.value
+                    s_info['risk_score']  = pa.attempt.risk_score or 0
+                elif pa.student_id:
+                    attempt = session.query(ExamAttempt).filter_by(
+                        exam_id=ep.exam_id, student_id=pa.student_id
+                    ).first()
+                    if attempt:
+                        s_info['attempt_id'] = attempt.id
+                        s_info['status']     = attempt.status.value
+                        s_info['risk_score'] = attempt.risk_score or 0
+                students.append(s_info)
+
+            d['my_students']      = students
+            d['my_student_count'] = len(students)
+            exams.append(d)
+
         return jsonify({'success': True, 'exams': exams})
     finally:
         session.close()

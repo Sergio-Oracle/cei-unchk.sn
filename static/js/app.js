@@ -761,10 +761,10 @@ function loadNavigation() {
     } else if (currentUser.role === 'surveillant') {
         tabs = `<div class="nav-tabs">
             <button class="nav-tab active" onclick="loadDashboard()">
-                <i class="fas fa-chart-line"></i> ${t('nav.dashboard')}
+                <i class="fas fa-tachometer-alt"></i> Dashboard
             </button>
             <button class="nav-tab" onclick="loadSurveillantExams()">
-                <i class="fas fa-laptop-code"></i> ${t('nav.my_exams_surv')}
+                <i class="fas fa-clipboard-list"></i> Mes Examens
             </button>
             <button class="nav-tab" onclick="toggleTheme()" id="theme-toggle-btn" title="${t('nav.change_theme')}">
                 <i class="fas fa-moon"></i>
@@ -10739,6 +10739,7 @@ async function _confirmSaveGeneratedSubject(title, content, rubric, ecId) {
 // ============================================================================
 
 async function loadSurveillantDashboard() {
+    if (window.event && window.event.target) setActiveTab(window.event.target);
     showLoader(true);
     try {
         const response = await authenticatedFetch('/api/surveillant/exams');
@@ -10748,103 +10749,119 @@ async function loadSurveillantDashboard() {
         const activeExams   = exams.filter(e => e.status === 'active');
         const totalStudents = exams.reduce((s, e) => s + (e.my_student_count || 0), 0);
 
+        const statusBadge = s => {
+            const cfg = {
+                in_progress:   ['En cours',    '#6366f1', '#ede9fe'],
+                submitted:     ['Soumis',       '#10b981', '#dcfce7'],
+                auto_submitted:['Auto-soumis',  '#8b5cf6', '#f3e8ff'],
+                banned:        ['Exclu',         '#ef4444', '#fef2f2'],
+                not_started:   ['Absent/Attente','#94a3b8', '#f1f5f9'],
+            };
+            const [label, col, bg] = cfg[s] || ['—', '#94a3b8', '#f1f5f9'];
+            return `<span style="background:${bg};color:${col};font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;">${label}</span>`;
+        };
+
+        // Student list per exam (for dashboard overview)
+        const studentListHtml = exams.map(exam => {
+            if (!exam.my_students || exam.my_students.length === 0) return '';
+            const rows = exam.my_students.map(s => {
+                const riskColor = s.risk_score >= 70 ? '#ef4444' : s.risk_score >= 40 ? '#f59e0b' : '#10b981';
+                return `<tr>
+                    <td style="padding:7px 12px;font-size:13px;font-weight:500;color:#0f172a;">
+                        <i class="fas fa-user-circle" style="color:#94a3b8;margin-right:6px;"></i>${escHtml(s.student_name)}
+                    </td>
+                    <td style="padding:7px 12px;">${statusBadge(s.status)}</td>
+                    <td style="padding:7px 12px;font-size:12px;font-weight:600;color:${riskColor};">
+                        ${exam.status === 'active' ? s.risk_score + '%' : '—'}
+                    </td>
+                </tr>`;
+            }).join('');
+            const sc = {active:'#10b981',scheduled:'#3b82f6',closed:'#94a3b8',draft:'#f59e0b'}[exam.status]||'#94a3b8';
+            return `<div style="background:white;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;margin-bottom:14px;">
+                <div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <span style="width:8px;height:8px;background:${sc};border-radius:50%;flex-shrink:0;"></span>
+                        <span style="font-size:14px;font-weight:700;color:#0f172a;">${escHtml(exam.title)}</span>
+                        <span style="font-size:12px;color:#64748b;">${exam.my_students.length} étudiant(s)</span>
+                    </div>
+                    ${exam.status === 'active' ? `<button onclick="openSurveillantDashboard(${exam.id})"
+                        style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;background:#7c3aed;color:white;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;">
+                        <i class="fas fa-shield-alt"></i> Surveiller
+                    </button>` : ''}
+                </div>
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead><tr style="background:#f8fafc;">
+                        <th style="padding:6px 12px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;">Étudiant</th>
+                        <th style="padding:6px 12px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;">Statut</th>
+                        <th style="padding:6px 12px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;">Risque</th>
+                    </tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>`;
+        }).join('') || '';
+
         document.getElementById('main-content').innerHTML = `
-            <div style="margin-bottom:28px;">
-                <h2 style="font-size:22px;font-weight:700;color:#0f172a;margin:0 0 4px;display:flex;align-items:center;gap:12px;">
-                    <span style="background:#f59e0b;width:44px;height:44px;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;">
-                        <i class="fas fa-eye" style="color:white;font-size:18px;"></i>
+            <div style="margin-bottom:24px;">
+                <h2 style="font-size:20px;font-weight:700;color:#0f172a;margin:0 0 4px;display:flex;align-items:center;gap:12px;">
+                    <span style="background:#f59e0b;width:40px;height:40px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">
+                        <i class="fas fa-tachometer-alt" style="color:white;font-size:16px;"></i>
                     </span>
-                    ${t('section.surveillant_dashboard')}
+                    Tableau de Bord Surveillant
                 </h2>
-                <p style="color:#64748b;margin:0 0 0 56px;font-size:13px;">${t('section.welcome')}, ${currentUser.full_name}</p>
+                <p style="color:#64748b;margin:0 0 0 52px;font-size:13px;">Bienvenue, ${escHtml(currentUser.full_name)}</p>
             </div>
 
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:28px;">
-                <div style="background:white;border-radius:12px;padding:20px;border:1px solid #e2e8f0;display:flex;align-items:center;gap:14px;">
-                    <div style="background:rgba(16,185,129,.1);width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                        <i class="fas fa-play-circle" style="color:#10b981;font-size:18px;"></i>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:24px;">
+                <div style="background:white;border-radius:12px;padding:18px;border:1px solid #e2e8f0;display:flex;align-items:center;gap:12px;">
+                    <div style="background:rgba(16,185,129,.12);width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                        <i class="fas fa-play-circle" style="color:#10b981;font-size:16px;"></i>
                     </div>
-                    <div><div style="font-size:28px;font-weight:800;color:#0f172a;">${activeExams.length}</div>
-                    <div style="font-size:12px;color:#64748b;font-weight:500;">${t('section.exams_in_progress')}</div></div>
+                    <div><div style="font-size:26px;font-weight:800;color:#0f172a;">${activeExams.length}</div>
+                    <div style="font-size:11px;color:#64748b;">En cours</div></div>
                 </div>
-                <div style="background:white;border-radius:12px;padding:20px;border:1px solid #e2e8f0;display:flex;align-items:center;gap:14px;">
-                    <div style="background:rgba(59,130,246,.1);width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                        <i class="fas fa-laptop-code" style="color:#3b82f6;font-size:18px;"></i>
+                <div style="background:white;border-radius:12px;padding:18px;border:1px solid #e2e8f0;display:flex;align-items:center;gap:12px;">
+                    <div style="background:rgba(59,130,246,.12);width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                        <i class="fas fa-laptop-code" style="color:#3b82f6;font-size:16px;"></i>
                     </div>
-                    <div><div style="font-size:28px;font-weight:800;color:#0f172a;">${exams.length}</div>
-                    <div style="font-size:12px;color:#64748b;font-weight:500;">${t('section.exams_assigned')}</div></div>
+                    <div><div style="font-size:26px;font-weight:800;color:#0f172a;">${exams.length}</div>
+                    <div style="font-size:11px;color:#64748b;">Examens assignés</div></div>
                 </div>
-                <div style="background:white;border-radius:12px;padding:20px;border:1px solid #e2e8f0;display:flex;align-items:center;gap:14px;">
-                    <div style="background:rgba(124,58,237,.1);width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                        <i class="fas fa-user-graduate" style="color:#7c3aed;font-size:18px;"></i>
+                <div style="background:white;border-radius:12px;padding:18px;border:1px solid #e2e8f0;display:flex;align-items:center;gap:12px;">
+                    <div style="background:rgba(124,58,237,.12);width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                        <i class="fas fa-user-graduate" style="color:#7c3aed;font-size:16px;"></i>
                     </div>
-                    <div><div style="font-size:28px;font-weight:800;color:#0f172a;">${totalStudents}</div>
-                    <div style="font-size:12px;color:#64748b;font-weight:500;">${t('section.students_to_monitor')}</div></div>
+                    <div><div style="font-size:26px;font-weight:800;color:#0f172a;">${totalStudents}</div>
+                    <div style="font-size:11px;color:#64748b;">Étudiants à surveiller</div></div>
                 </div>
             </div>
 
             ${activeExams.length > 0 ? `
-            <div style="background:white;border:1px solid #a7f3d0;border-left:4px solid #10b981;border-radius:12px;padding:20px;margin-bottom:24px;">
-                <h3 style="margin:0 0 14px;font-size:15px;color:#065f46;font-weight:700;display:flex;align-items:center;gap:8px;">
-                    <i class="fas fa-play-circle"></i> ${t('section.active_exams_action')}
+            <div style="background:white;border:1px solid #a7f3d0;border-left:4px solid #10b981;border-radius:12px;padding:16px 20px;margin-bottom:20px;">
+                <h3 style="margin:0 0 10px;font-size:14px;color:#065f46;font-weight:700;display:flex;align-items:center;gap:8px;">
+                    <i class="fas fa-play-circle"></i> Examens en cours — Action requise
                 </h3>
                 ${activeExams.map(e => `
-                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:12px 0;border-bottom:1px solid #f0fdf4;">
+                <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:10px 0;${activeExams.indexOf(e)<activeExams.length-1?'border-bottom:1px solid #f0fdf4;':''}">
                     <div>
-                        <div style="font-weight:600;color:#0f172a;font-size:14px;">${e.title}</div>
+                        <div style="font-weight:600;color:#0f172a;font-size:14px;">${escHtml(e.title)}</div>
                         <div style="font-size:12px;color:#64748b;margin-top:2px;">
-                            <i class="fas fa-user-graduate"></i> ${e.my_student_count || 0} ${t('section.my_students_group')}
+                            <i class="fas fa-user-graduate"></i> ${e.my_student_count || 0} étudiant(s) dans votre groupe
                         </div>
                     </div>
                     <button onclick="openSurveillantDashboard(${e.id})"
                         style="display:inline-flex;align-items:center;gap:6px;padding:9px 18px;background:#7c3aed;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
-                        <i class="fas fa-shield-alt"></i> ${t('btn.monitor_now')}
+                        <i class="fas fa-shield-alt"></i> Surveiller maintenant
                     </button>
                 </div>`).join('')}
             </div>` : ''}
 
-            ${exams.length > 0 ? `
-            <div style="background:white;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden;">
-                <div style="padding:16px 20px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:10px;">
-                    <i class="fas fa-list" style="color:#64748b;"></i>
-                    <h3 style="margin:0;font-size:14px;font-weight:700;color:#0f172a;">${t('section.all_my_exams')}</h3>
-                </div>
-                <div style="overflow-x:auto;">
-                    <table style="width:100%;border-collapse:collapse;">
-                        <thead><tr style="background:#f8fafc;">
-                            <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:1px solid #e2e8f0;">Examen</th>
-                            <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:1px solid #e2e8f0;">Statut</th>
-                            <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:1px solid #e2e8f0;">Mes étudiants</th>
-                            <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;border-bottom:1px solid #e2e8f0;">Action</th>
-                        </tr></thead>
-                        <tbody>
-                        ${exams.map(e => {
-                            const sc = {active:'#059669;background:#ecfdf5', scheduled:'#d97706;background:#fffbeb', closed:'#dc2626;background:#fff1f2', draft:'#64748b;background:#f1f5f9'};
-                            const [col, bg] = (sc[e.status]||'#64748b;background:#f1f5f9').split(';background:');
-                            const statusLabel = {active:'En cours', scheduled:'Planifié', closed:'Terminé', draft:'Brouillon'}[e.status] || e.status;
-                            return `<tr>
-                                <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:600;color:#0f172a;">${e.title}</td>
-                                <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;">
-                                    <span style="background:${bg};color:${col};padding:3px 9px;border-radius:99px;font-size:11px;font-weight:700;">${statusLabel}</span>
-                                </td>
-                                <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#64748b;">${e.my_student_count || 0}</td>
-                                <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;">
-                                    ${e.status === 'active' ? `
-                                    <button onclick="openSurveillantDashboard(${e.id})"
-                                        style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;background:#7c3aed;color:white;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">
-                                        <i class="fas fa-shield-alt"></i> Surveiller
-                                    </button>` : '<span style="color:#94a3b8;font-size:12px;">—</span>'}
-                                </td>
-                            </tr>`;
-                        }).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            </div>` : `
-            <div style="text-align:center;padding:64px 24px;background:white;border-radius:16px;border:1px solid #e2e8f0;">
-                <i class="fas fa-eye" style="font-size:48px;color:#cbd5e1;display:block;margin-bottom:16px;"></i>
-                <h3 style="color:#475569;font-size:18px;font-weight:600;margin:0 0 8px;">Aucun examen assigné</h3>
-                <p style="color:#94a3b8;font-size:14px;margin:0;">L'enseignant vous assignera des examens à surveiller.</p>
+            <h3 style="font-size:13px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin:0 0 12px;display:flex;align-items:center;gap:8px;">
+                <i class="fas fa-users" style="color:#7c3aed;"></i> Mes étudiants par examen
+            </h3>
+            ${studentListHtml || `<div style="text-align:center;padding:40px 24px;background:white;border-radius:12px;border:1px solid #e2e8f0;">
+                <i class="fas fa-eye" style="font-size:40px;color:#cbd5e1;display:block;margin-bottom:12px;"></i>
+                <h3 style="color:#475569;font-size:16px;font-weight:600;margin:0 0 6px;">Aucun examen assigné</h3>
+                <p style="color:#94a3b8;font-size:13px;margin:0;">L'enseignant vous assignera des examens à surveiller.</p>
             </div>`}
         `;
     } catch (error) {
@@ -10854,9 +10871,112 @@ async function loadSurveillantDashboard() {
     }
 }
 
+// ─── Onglet "Mes Examens" — vue différente axée planning ─────────────────────
+
 async function loadSurveillantExams() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
-    await loadSurveillantDashboard();
+    showLoader(true);
+    try {
+        const response = await authenticatedFetch('/api/surveillant/exams');
+        const data = await response.json();
+        const exams = data.exams || [];
+
+        const statusCfg = {
+            active:    { label: 'En cours',  col: '#059669', bg: '#ecfdf5' },
+            scheduled: { label: 'Planifié',  col: '#d97706', bg: '#fffbeb' },
+            closed:    { label: 'Terminé',   col: '#dc2626', bg: '#fff1f2' },
+            draft:     { label: 'Brouillon', col: '#64748b', bg: '#f1f5f9' },
+        };
+
+        const examCards = exams.map(e => {
+            const sc    = statusCfg[e.status] || statusCfg.draft;
+            const dt    = e.start_time ? new Date(e.start_time).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+            const dur   = e.duration_minutes ? e.duration_minutes + ' min' : '—';
+            const total = e.my_students ? e.my_students.length : 0;
+            const inProgress  = (e.my_students||[]).filter(s => s.status === 'in_progress').length;
+            const submitted   = (e.my_students||[]).filter(s => ['submitted','auto_submitted'].includes(s.status)).length;
+            const notStarted  = (e.my_students||[]).filter(s => s.status === 'not_started').length;
+            const banned      = (e.my_students||[]).filter(s => s.status === 'banned').length;
+
+            const studentRows = (e.my_students || []).map((s, idx) => {
+                const stCfg = {
+                    in_progress:   ['En cours',     '#6366f1','#ede9fe'],
+                    submitted:     ['Soumis',        '#10b981','#dcfce7'],
+                    auto_submitted:['Auto-soumis',   '#8b5cf6','#f3e8ff'],
+                    banned:        ['Exclu',          '#ef4444','#fef2f2'],
+                    not_started:   ['Pas commencé',  '#94a3b8','#f1f5f9'],
+                };
+                const [sl, sc2, sbg] = stCfg[s.status] || ['—','#94a3b8','#f1f5f9'];
+                const riskColor = s.risk_score >= 70 ? '#ef4444' : s.risk_score >= 40 ? '#f59e0b' : '#10b981';
+                return `<tr style="${idx % 2 === 0 ? 'background:#fafafa;' : ''}">
+                    <td style="padding:8px 14px;font-size:13px;color:#0f172a;">${idx + 1}. ${escHtml(s.student_name)}</td>
+                    <td style="padding:8px 14px;">
+                        <span style="background:${sbg};color:${sc2};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;">${sl}</span>
+                    </td>
+                    <td style="padding:8px 14px;font-size:12px;font-weight:700;color:${riskColor};">
+                        ${e.status === 'active' || e.status === 'closed' ? s.risk_score + '%' : '—'}
+                    </td>
+                </tr>`;
+            }).join('');
+
+            return `<div style="background:white;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;margin-bottom:16px;">
+                <!-- Card header -->
+                <div style="padding:16px 20px;border-bottom:1px solid #f1f5f9;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                    <div>
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+                            <span style="background:${sc.bg};color:${sc.col};font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;">${sc.label}</span>
+                            <span style="font-size:15px;font-weight:700;color:#0f172a;">${escHtml(e.title)}</span>
+                        </div>
+                        <div style="font-size:12px;color:#64748b;display:flex;gap:16px;flex-wrap:wrap;">
+                            <span><i class="fas fa-calendar" style="color:#94a3b8;margin-right:4px;"></i>${dt}</span>
+                            <span><i class="fas fa-clock" style="color:#94a3b8;margin-right:4px;"></i>${dur}</span>
+                            <span><i class="fas fa-users" style="color:#94a3b8;margin-right:4px;"></i>${total} étudiant(s)</span>
+                        </div>
+                    </div>
+                    ${e.status === 'active' ? `<button onclick="openSurveillantDashboard(${e.id})"
+                        style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:#7c3aed;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0;">
+                        <i class="fas fa-shield-alt"></i> Surveiller
+                    </button>` : ''}
+                </div>
+                <!-- Progress mini-stats -->
+                <div style="padding:10px 20px;background:#f8fafc;border-bottom:1px solid #f1f5f9;display:flex;gap:18px;flex-wrap:wrap;">
+                    <span style="font-size:12px;color:#6366f1;font-weight:600;"><b>${inProgress}</b> en cours</span>
+                    <span style="font-size:12px;color:#10b981;font-weight:600;"><b>${submitted}</b> soumis</span>
+                    <span style="font-size:12px;color:#94a3b8;font-weight:600;"><b>${notStarted}</b> pas commencé</span>
+                    ${banned ? `<span style="font-size:12px;color:#ef4444;font-weight:600;"><b>${banned}</b> exclu(s)</span>` : ''}
+                </div>
+                <!-- Student list -->
+                ${total > 0 ? `<table style="width:100%;border-collapse:collapse;">
+                    <thead><tr style="background:#f8fafc;">
+                        <th style="padding:7px 14px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;border-bottom:1px solid #e2e8f0;">Étudiant</th>
+                        <th style="padding:7px 14px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;border-bottom:1px solid #e2e8f0;">Statut</th>
+                        <th style="padding:7px 14px;text-align:left;font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;border-bottom:1px solid #e2e8f0;">Risque</th>
+                    </tr></thead>
+                    <tbody>${studentRows}</tbody>
+                </table>` : '<p style="padding:16px 20px;color:#94a3b8;font-size:13px;">Aucun étudiant assigné.</p>'}
+            </div>`;
+        }).join('') || `<div style="text-align:center;padding:48px 24px;background:white;border-radius:14px;border:1px solid #e2e8f0;">
+            <i class="fas fa-clipboard-list" style="font-size:40px;color:#cbd5e1;display:block;margin-bottom:12px;"></i>
+            <h3 style="color:#475569;font-size:16px;margin:0 0 6px;">Aucun examen</h3>
+            <p style="color:#94a3b8;font-size:13px;margin:0;">Vos examens assignés apparaîtront ici.</p>
+        </div>`;
+
+        document.getElementById('main-content').innerHTML = `
+            <div style="margin-bottom:20px;display:flex;align-items:center;gap:12px;">
+                <span style="background:#3b82f6;width:40px;height:40px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <i class="fas fa-clipboard-list" style="color:white;font-size:16px;"></i>
+                </span>
+                <div>
+                    <h2 style="font-size:19px;font-weight:700;color:#0f172a;margin:0;">Mes Examens</h2>
+                    <p style="color:#64748b;margin:0;font-size:13px;">${exams.length} examen(s) assigné(s) — liste complète avec étudiants</p>
+                </div>
+            </div>
+            ${examCards}`;
+    } catch (error) {
+        showAlert(humanError(error), 'error');
+    } finally {
+        showLoader(false);
+    }
 }
 
 function openSurveillantDashboard(examId) {
