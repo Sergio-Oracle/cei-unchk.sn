@@ -2866,7 +2866,8 @@ def get_reclamations():
 
         query = session.query(Reclamation).options(
             joinedload(Reclamation.student),
-            joinedload(Reclamation.paper).joinedload(StudentPaper.subject)
+            joinedload(Reclamation.paper).joinedload(StudentPaper.subject),
+            joinedload(Reclamation.attempt).joinedload(ExamAttempt.exam)
         )
 
         if user.role == UserRole.STUDENT:
@@ -2876,12 +2877,25 @@ def get_reclamations():
 
         reclamations_list = []
         for r in reclamations:
+            # Résolution du titre selon le type
+            if r.paper and r.paper.subject:
+                subject_title = r.paper.subject.title
+            elif r.attempt and r.attempt.exam:
+                subject_title = r.attempt.exam.title
+            else:
+                subject_title = 'Sujet supprimé'
+
             reclamations_list.append({
                 'id': r.id,
                 'paper_id': r.paper_id,
+                'attempt_id': r.attempt_id,
+                'type': 'online_exam' if r.attempt_id else 'paper',
                 'student_id': r.student_id,
                 'student_name': r.student.full_name if r.student else 'Inconnu',
-                'subject_title': r.paper.subject.title if r.paper and r.paper.subject else 'Sujet supprimé',
+                'subject_title': subject_title,
+                'exam_title': r.attempt.exam.title if r.attempt and r.attempt.exam else None,
+                'attempt_score': r.attempt.score if r.attempt else None,
+                'attempt_feedback': r.attempt.feedback if r.attempt else None,
                 'reason': r.reason,
                 'status': r.status.value,
                 'response': r.response,
