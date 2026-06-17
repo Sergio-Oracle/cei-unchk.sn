@@ -3047,12 +3047,18 @@ def process_reclamation_ia(reclamation_id):
             return jsonify({'error': 'Réclamation déjà traitée'}), 400
 
         paper = reclamation.paper
-        if not paper:
-            session.close()
-            return jsonify({'error': "Le traitement IA n'est disponible que pour les réclamations sur copies papier. Pour les examens en ligne, répondez manuellement."}), 400
-        subject = paper.subject
+        attempt = reclamation.attempt
 
-        system_prompt = """Tu es un arbitre impartial pour les réclamations de notes d'examen.
+        if not paper and not attempt:
+            session.close()
+            return jsonify({'error': 'Réclamation sans copie associée — impossible d\'analyser.'}), 400
+
+        # ── Construire le contexte selon le type de réclamation ──────────────
+        if paper:
+            # Réclamation sur copie papier
+            subject = paper.subject
+            original_score = paper.score or 0
+            system_prompt = """Tu es un arbitre impartial pour les réclamations de notes d'examen.
 
 Analyse la réclamation de l'étudiant, la copie originale, la correction originale et le barème.
 Décide si la réclamation est valide.
@@ -3072,13 +3078,49 @@ Si REJECTED: Note originale inchangée
 Si RESOLVED: Correction révisée complète
 Si REJECTED: Correction originale inchangée"""
 
-        user_message = f"""SUJET: {subject.content}
+            user_message = f"""SUJET: {subject.content if subject else 'N/A'}
 
-BARÈME: {subject.rubric}
+BARÈME: {subject.rubric if subject else 'N/A'}
 
 COPIE ÉTUDIANT: {paper.content}
 
 CORRECTION ORIGINALE: {paper.grade} (Note: {paper.score}/20)
+
+RÉCLAMATION ÉTUDIANT: {reclamation.reason}
+
+Analyse et décide."""
+        else:
+            # Réclamation sur examen en ligne
+            exam = attempt.exam
+            original_score = attempt.score or 0
+            answers_text = attempt.answers or 'Aucune réponse enregistrée'
+            feedback_text = attempt.feedback or 'Aucune correction disponible'
+            system_prompt = """Tu es un arbitre impartial pour les réclamations de notes d'examen en ligne.
+
+Analyse la réclamation de l'étudiant, ses réponses soumises et la correction IA initiale.
+Décide si la réclamation est valide.
+
+Format de sortie OBLIGATOIRE:
+=== DÉCISION ===
+[RESOLVED ou REJECTED]
+
+=== RAISON ===
+[Explication détaillée]
+
+=== NOUVELLE NOTE ===
+Si RESOLVED: XX.XX/20
+Si REJECTED: Note originale inchangée
+
+=== NOUVELLE CORRECTION ===
+Si RESOLVED: Commentaire de correction révisé
+Si REJECTED: Correction originale inchangée"""
+
+            user_message = f"""EXAMEN: {exam.title if exam else 'N/A'}
+INSTRUCTIONS: {exam.instructions[:500] if exam and exam.instructions else 'N/A'}
+
+RÉPONSES DE L'ÉTUDIANT: {answers_text[:3000]}
+
+CORRECTION INITIALE: {feedback_text[:3000]} (Note: {original_score}/20)
 
 RÉCLAMATION ÉTUDIANT: {reclamation.reason}
 
@@ -3098,9 +3140,9 @@ Analyse et décide."""
 
         decision = decision_match.group(1)
         reason = reason_match.group(1).strip() if reason_match else ''
-        new_grade = new_grade_match.group(1).strip() if new_grade_match else paper.grade
+        new_grade = new_grade_match.group(1).strip() if new_grade_match else (paper.grade if paper else feedback_text[:200])
 
-        new_score = paper.score
+        new_score = original_score
         if decision == 'RESOLVED' and new_score_match:
             new_score_str = new_score_match.group(1).strip()
             new_score = extract_score_from_correction(new_score_str)
@@ -3110,7 +3152,7 @@ Analyse et décide."""
         reclamation.ia_proposed_status = 'resolved' if decision == 'RESOLVED' else 'rejected'
         reclamation.ia_proposed_reason = reason
         reclamation.ia_proposed_grade = new_grade if decision == 'RESOLVED' else None
-        reclamation.ia_proposed_score = new_score if decision == 'RESOLVED' else paper.score
+        reclamation.ia_proposed_score = new_score if decision == 'RESOLVED' else original_score
         reclamation.ia_processed_at = utcnow()
         # Ne change pas le statut (reste PENDING) — la décision finale doit être approuvée par un professeur
         reclamation.updated_at = utcnow()

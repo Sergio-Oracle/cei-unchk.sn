@@ -5774,7 +5774,7 @@ ${data.ia_decision || data.ia_proposed_reason || 'Aucune justification fournie'}
             showAlert(data.error || 'Impossible d\'analyser cette réclamation avec l\'IA.', 'error');
         }
     } catch (error) {
-        showAlert("Impossible de lancer l'analyse IA. Vérifiez votre connexion et réessayez.", 'error');
+        showAlert(humanError(error), 'error');
     } finally {
         showLoader(false);
     }
