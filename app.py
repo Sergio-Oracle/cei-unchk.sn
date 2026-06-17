@@ -6617,6 +6617,447 @@ def _send_exam_closure_summary(exam_id: int, professor_email: str, professor_nam
         print(f"⚠️  Email clôture exam#{exam_id}: {e}")
 
 
+# ============================================================================
+# ZIP COPIES CORRIGÉES PAR EXAMEN
+# ============================================================================
+
+@app.route('/api/online_exams/<int:exam_id>/corrections/zip', methods=['GET'])
+@jwt_required()
+def download_corrections_zip(exam_id):
+    """ZIP de toutes les copies corrigées d'un examen (une copie texte par étudiant)."""
+    try:
+        import zipfile as zipfile_mod
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if user.role not in [UserRole.PROFESSOR, UserRole.ADMIN]:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        exam = session.query(OnlineExam).filter_by(id=exam_id).first()
+        if not exam:
+            session.close()
+            return jsonify({'error': 'Examen non trouvé'}), 404
+        attempts = session.query(ExamAttempt).options(
+            joinedload(ExamAttempt.student)
+        ).filter(
+            ExamAttempt.exam_id == exam_id,
+            ExamAttempt.score.isnot(None)
+        ).all()
+        if not attempts:
+            session.close()
+            return jsonify({'error': 'Aucune copie corrigée pour cet examen'}), 404
+
+        zip_buf = io.BytesIO()
+        with zipfile_mod.ZipFile(zip_buf, 'w', zipfile_mod.ZIP_DEFLATED) as zf:
+            for attempt in attempts:
+                try:
+                    answers_data = json.loads(attempt.answers) if attempt.answers else {}
+                    student_text = (
+                        answers_data.get('content') or answers_data.get('reponse') or
+                        answers_data.get('answer')  or answers_data.get('text') or 'Non disponible'
+                    )
+                except Exception:
+                    student_text = attempt.answers or 'Non disponible'
+
+                duration_str = '—'
+                if attempt.submitted_at and attempt.started_at:
+                    mins = int((attempt.submitted_at - attempt.started_at).total_seconds() / 60)
+                    duration_str = f"{mins} min"
+
+                content = (
+                    f"COPIE CORRIGÉE — {exam.title}\n"
+                    f"{'='*60}\n"
+                    f"Étudiant   : {attempt.student.full_name if attempt.student else '—'}\n"
+                    f"Note       : {attempt.score}/20\n"
+                    f"Risque     : {attempt.risk_score or 0}%\n"
+                    f"Durée      : {duration_str}\n"
+                    f"Corrigé le : {attempt.corrected_at.strftime('%d/%m/%Y %H:%M') if attempt.corrected_at else '—'}\n"
+                    f"Infractions: {attempt.tab_switches or 0} changement(s) de fenêtre, "
+                    f"{attempt.warnings_count or 0} avertissement(s), "
+                    f"{attempt.no_face_count or 0} absence(s) de visage\n"
+                    f"\n{'='*60}\n"
+                    f"RÉPONSES DE L'ÉTUDIANT\n"
+                    f"{'='*60}\n"
+                    f"{student_text}\n"
+                    f"\n{'='*60}\n"
+                    f"CORRECTION IA\n"
+                    f"{'='*60}\n"
+                    f"{attempt.feedback or 'Pas de feedback disponible'}\n"
+                )
+                safe_name = re.sub(r'[^\w\s-]', '', attempt.student.full_name if attempt.student else 'etudiant')
+                safe_name = safe_name.strip().replace(' ', '_')
+                filename = f"{safe_name}_{attempt.score:.1f}_sur_20.txt"
+                zf.writestr(filename, content.encode('utf-8'))
+
+        exam_title = exam.title
+        session.close()
+        zip_buf.seek(0)
+        safe_title = re.sub(r'[^\w\s-]', '', exam_title).strip().replace(' ', '_')
+        return send_file(
+            zip_buf,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=f"corrections_{safe_title}.zip"
+        )
+    except Exception as e:
+        print(f"❌ download_corrections_zip {exam_id}: {e}")
+        try: session.close()
+        except: pass
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# RÉVISION DÉTAILLÉE D'UNE TENTATIVE
+# ============================================================================
+
+@app.route('/api/exam_attempts/<int:attempt_id>/review', methods=['GET'])
+@jwt_required()
+def get_attempt_review(attempt_id):
+    """Vue complète d'une tentative: réponses, correction, incidents, notes surveillant."""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+
+        attempt = session.query(ExamAttempt).options(
+            joinedload(ExamAttempt.exam).joinedload(OnlineExam.subject),
+            joinedload(ExamAttempt.student),
+            joinedload(ExamAttempt.activity_logs)
+        ).filter_by(id=attempt_id).first()
+
+        if not attempt:
+            session.close()
+            return jsonify({'error': 'Tentative non trouvée'}), 404
+
+        if user.role == UserRole.PROFESSOR and attempt.exam.created_by_id != user_id:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+
+        try:
+            answers_data = json.loads(attempt.answers) if attempt.answers else {}
+            student_text = (
+                answers_data.get('content') or answers_data.get('reponse') or
+                answers_data.get('answer')  or answers_data.get('text') or ''
+            )
+        except Exception:
+            student_text = attempt.answers or ''
+
+        incidents = []
+        proctor_notes = []
+        for log in sorted(attempt.activity_logs, key=lambda x: x.timestamp or datetime.min):
+            try:
+                ed = json.loads(log.event_data) if log.event_data else {}
+            except Exception:
+                ed = {}
+            if log.event_type == 'proctor_note':
+                proctor_notes.append({
+                    'note':      ed.get('note', ''),
+                    'author':    ed.get('author', ''),
+                    'timestamp': log.timestamp.isoformat() if log.timestamp else None,
+                })
+            else:
+                incidents.append({
+                    'type':      log.event_type,
+                    'data':      ed,
+                    'timestamp': log.timestamp.isoformat() if log.timestamp else None,
+                })
+
+        duration_min = None
+        if attempt.submitted_at and attempt.started_at:
+            duration_min = round((attempt.submitted_at - attempt.started_at).total_seconds() / 60, 1)
+
+        session.close()
+        return jsonify({
+            'attempt_id':    attempt.id,
+            'student_name':  attempt.student.full_name if attempt.student else '—',
+            'student_email': attempt.student.email if attempt.student else '—',
+            'exam_title':    attempt.exam.title if attempt.exam else '—',
+            'subject_title': attempt.exam.subject.title if attempt.exam and attempt.exam.subject else '—',
+            'status':        attempt.status.value,
+            'score':         attempt.score,
+            'started_at':    attempt.started_at.isoformat()  if attempt.started_at  else None,
+            'submitted_at':  attempt.submitted_at.isoformat() if attempt.submitted_at else None,
+            'duration_min':  duration_min,
+            'risk_score':    attempt.risk_score or 0,
+            'tab_switches':  attempt.tab_switches or 0,
+            'warnings_count':attempt.warnings_count or 0,
+            'no_face_count': attempt.no_face_count or 0,
+            'extra_minutes': attempt.extra_minutes or 0,
+            'ban_reason':    attempt.ban_reason,
+            'student_answer': student_text,
+            'feedback':      attempt.feedback,
+            'incidents':     incidents,
+            'proctor_notes': proctor_notes,
+            'corrected_at':  attempt.corrected_at.isoformat() if attempt.corrected_at else None,
+        })
+    except Exception as e:
+        print(f"❌ get_attempt_review {attempt_id}: {e}")
+        try: session.close()
+        except: pass
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# DASHBOARD ANALYTIQUE GLOBAL PROFESSEUR
+# ============================================================================
+
+@app.route('/api/professor/analytics', methods=['GET'])
+@jwt_required()
+def get_professor_analytics():
+    """Statistiques globales : tous les examens, moyennes, taux réussite, activité récente."""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if user.role not in [UserRole.PROFESSOR, UserRole.ADMIN]:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+
+        if user.role == UserRole.ADMIN:
+            exams = session.query(OnlineExam).all()
+        else:
+            exams = session.query(OnlineExam).filter_by(created_by_id=user_id).all()
+
+        exam_ids = [e.id for e in exams]
+
+        all_attempts = session.query(ExamAttempt).filter(
+            ExamAttempt.exam_id.in_(exam_ids)
+        ).options(joinedload(ExamAttempt.student)).all() if exam_ids else []
+
+        submitted = [a for a in all_attempts if a.status.value in ('submitted', 'auto_submitted')]
+        all_scores = [a.score for a in submitted if a.score is not None]
+
+        exam_stats = []
+        for exam in exams:
+            e_attempts  = [a for a in all_attempts if a.exam_id == exam.id]
+            e_submitted = [a for a in e_attempts if a.status.value in ('submitted', 'auto_submitted')]
+            e_scores    = [a.score for a in e_submitted if a.score is not None]
+            exam_stats.append({
+                'id':        exam.id,
+                'title':     exam.title,
+                'status':    exam.status.value,
+                'total':     len(e_attempts),
+                'submitted': len(e_submitted),
+                'corrected': len(e_scores),
+                'avg_score': round(sum(e_scores)/len(e_scores), 2) if e_scores else None,
+                'pass_rate': round(sum(1 for s in e_scores if s >= 10)/len(e_scores)*100, 1) if e_scores else None,
+            })
+
+        ranked = [e for e in exam_stats if e['avg_score'] is not None and e['corrected'] >= 2]
+        ranked.sort(key=lambda x: x['avg_score'], reverse=True)
+
+        recent = session.query(ExamAttempt).filter(
+            ExamAttempt.exam_id.in_(exam_ids),
+            ExamAttempt.corrected_at.isnot(None)
+        ).order_by(ExamAttempt.corrected_at.desc()).limit(10).all() if exam_ids else []
+
+        recent_list = [{
+            'student_name': a.student.full_name if a.student else '—',
+            'exam_title':   a.exam.title if a.exam else '—',
+            'score':        a.score,
+            'corrected_at': a.corrected_at.isoformat() if a.corrected_at else None,
+        } for a in recent]
+
+        status_counts = {}
+        for exam in exams:
+            s = exam.status.value
+            status_counts[s] = status_counts.get(s, 0) + 1
+
+        session.close()
+        return jsonify({
+            'total_exams':      len(exams),
+            'status_counts':    status_counts,
+            'total_attempts':   len(all_attempts),
+            'total_submitted':  len(submitted),
+            'total_corrected':  len(all_scores),
+            'overall_avg':      round(sum(all_scores)/len(all_scores), 2) if all_scores else None,
+            'overall_pass_rate':round(sum(1 for s in all_scores if s >= 10)/len(all_scores)*100, 1) if all_scores else None,
+            'top_exams':        ranked[:3],
+            'bottom_exams':     ranked[-3:][::-1] if len(ranked) >= 3 else [],
+            'recent_corrections': recent_list,
+            'exam_stats':       exam_stats,
+        })
+    except Exception as e:
+        print(f"❌ get_professor_analytics: {e}")
+        try: session.close()
+        except: pass
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# PDF RAPPORT INDIVIDUEL PAR TENTATIVE
+# ============================================================================
+
+@app.route('/api/exam_attempts/<int:attempt_id>/report/pdf', methods=['GET'])
+@jwt_required()
+def download_attempt_report_pdf(attempt_id):
+    """PDF rapport individuel complet d'une tentative d'examen."""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+        from reportlab.lib import colors as rl_colors
+        from reportlab.lib.units import cm
+
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if user.role not in [UserRole.PROFESSOR, UserRole.ADMIN]:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+
+        attempt = session.query(ExamAttempt).options(
+            joinedload(ExamAttempt.exam).joinedload(OnlineExam.subject),
+            joinedload(ExamAttempt.student),
+            joinedload(ExamAttempt.activity_logs)
+        ).filter_by(id=attempt_id).first()
+
+        if not attempt:
+            session.close()
+            return jsonify({'error': 'Tentative non trouvée'}), 404
+
+        if user.role == UserRole.PROFESSOR and attempt.exam.created_by_id != user_id:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+
+        try:
+            answers_data = json.loads(attempt.answers) if attempt.answers else {}
+            student_text = (
+                answers_data.get('content') or answers_data.get('reponse') or
+                answers_data.get('answer')  or answers_data.get('text') or 'Non disponible'
+            )
+        except Exception:
+            student_text = attempt.answers or 'Non disponible'
+
+        duration_str = '—'
+        if attempt.submitted_at and attempt.started_at:
+            mins = int((attempt.submitted_at - attempt.started_at).total_seconds() / 60)
+            duration_str = f"{mins} min"
+
+        incident_count = sum(1 for log in attempt.activity_logs if log.event_type != 'proctor_note')
+        note_count     = sum(1 for log in attempt.activity_logs if log.event_type == 'proctor_note')
+
+        buffer = io.BytesIO()
+        doc    = SimpleDocTemplate(buffer, pagesize=A4,
+                                   leftMargin=1.5*cm, rightMargin=1.5*cm,
+                                   topMargin=1.5*cm, bottomMargin=1.5*cm)
+        styles = getSampleStyleSheet()
+        story  = []
+
+        # En-tête
+        hdr_data = [['CEI — Rapport de Copie',
+                      f"Généré le {datetime.utcnow().strftime('%d/%m/%Y %H:%M')} UTC"]]
+        hdr_tbl = Table(hdr_data, colWidths=[13*cm, 5*cm])
+        hdr_tbl.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), rl_colors.HexColor('#1e293b')),
+            ('TEXTCOLOR',  (0,0), (-1,-1), rl_colors.white),
+            ('FONTNAME',   (0,0), (0,0),  'Helvetica-Bold'),
+            ('FONTSIZE',   (0,0), (0,0),  13),
+            ('FONTSIZE',   (1,0), (1,0),   9),
+            ('ALIGN',      (1,0), (1,0),  'RIGHT'),
+            ('VALIGN',     (0,0), (-1,-1),'MIDDLE'),
+            ('PADDING',    (0,0), (-1,-1), 10),
+        ]))
+        story.append(hdr_tbl)
+        story.append(Spacer(1, 0.4*cm))
+
+        score_color = rl_colors.HexColor('#10b981') if (attempt.score or 0) >= 10 else rl_colors.HexColor('#ef4444')
+        risk_val    = attempt.risk_score or 0
+        risk_color  = (rl_colors.HexColor('#ef4444') if risk_val >= 70 else
+                       rl_colors.HexColor('#f59e0b') if risk_val >= 40 else rl_colors.HexColor('#10b981'))
+
+        info_data = [
+            ['Étudiant', attempt.student.full_name if attempt.student else '—',
+             'Note',        f"{attempt.score}/20" if attempt.score is not None else '—'],
+            ['Examen',   attempt.exam.title if attempt.exam else '—',
+             'Risque',      f"{risk_val}%"],
+            ['Matière',  attempt.exam.subject.title if attempt.exam and attempt.exam.subject else '—',
+             'Durée',       duration_str],
+            ['Statut',   attempt.status.value,
+             'Extra-temps', f"{attempt.extra_minutes or 0} min"],
+        ]
+        info_tbl = Table(info_data, colWidths=[3*cm, 9*cm, 2.5*cm, 3.5*cm])
+        info_style = TableStyle([
+            ('FONTNAME',       (0,0), (-1,-1),  'Helvetica'),
+            ('FONTSIZE',       (0,0), (-1,-1),   9),
+            ('FONTNAME',       (0,0), (0,-1),   'Helvetica-Bold'),
+            ('FONTNAME',       (2,0), (2,-1),   'Helvetica-Bold'),
+            ('TEXTCOLOR',      (0,0), (0,-1),    rl_colors.HexColor('#64748b')),
+            ('TEXTCOLOR',      (2,0), (2,-1),    rl_colors.HexColor('#64748b')),
+            ('ROWBACKGROUNDS', (0,0), (-1,-1),  [rl_colors.HexColor('#f8fafc'), rl_colors.white]),
+            ('PADDING',        (0,0), (-1,-1),   7),
+            ('BOX',            (0,0), (-1,-1),   0.5, rl_colors.HexColor('#e2e8f0')),
+            ('INNERGRID',      (0,0), (-1,-1),   0.3, rl_colors.HexColor('#e2e8f0')),
+        ])
+        if attempt.score is not None:
+            info_style.add('TEXTCOLOR', (3,0), (3,0), score_color)
+            info_style.add('FONTNAME',  (3,0), (3,0), 'Helvetica-Bold')
+        info_style.add('TEXTCOLOR', (3,1), (3,1), risk_color)
+        info_tbl.setStyle(info_style)
+        story.append(info_tbl)
+        story.append(Spacer(1, 0.4*cm))
+
+        story.append(Paragraph(
+            f"<b>Incidents</b> : {attempt.tab_switches or 0} changement(s) de fenêtre · "
+            f"{attempt.warnings_count or 0} avertissement(s) · "
+            f"{attempt.no_face_count or 0} absence(s) de visage · "
+            f"{incident_count} événement(s) total · {note_count} note(s) de surveillance",
+            ParagraphStyle('inc', parent=styles['Normal'], fontSize=9)
+        ))
+        story.append(Spacer(1, 0.4*cm))
+        story.append(HRFlowable(width="100%", thickness=0.5, color=rl_colors.HexColor('#e2e8f0')))
+        story.append(Spacer(1, 0.3*cm))
+
+        story.append(Paragraph("<b>Réponses de l'étudiant</b>",
+            ParagraphStyle('h3', parent=styles['Normal'], fontSize=11,
+                           textColor=rl_colors.HexColor('#1e293b'))))
+        story.append(Spacer(1, 0.2*cm))
+        ans_style = ParagraphStyle('ans', parent=styles['Normal'], fontSize=8.5, leading=13,
+                                   textColor=rl_colors.HexColor('#334155'))
+        truncated_ans = (student_text[:4000] + '…') if len(student_text) > 4000 else student_text
+        for chunk in truncated_ans.split('\n'):
+            if chunk.strip():
+                story.append(Paragraph(chunk.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;'), ans_style))
+            else:
+                story.append(Spacer(1, 0.1*cm))
+
+        if attempt.feedback:
+            story.append(Spacer(1, 0.4*cm))
+            story.append(HRFlowable(width="100%", thickness=0.5, color=rl_colors.HexColor('#e2e8f0')))
+            story.append(Spacer(1, 0.3*cm))
+            story.append(Paragraph("<b>Correction IA</b>",
+                ParagraphStyle('h3fb', parent=styles['Normal'], fontSize=11,
+                               textColor=rl_colors.HexColor('#6366f1'))))
+            story.append(Spacer(1, 0.2*cm))
+            fb_style = ParagraphStyle('fb', parent=styles['Normal'], fontSize=8.5, leading=13,
+                                       textColor=rl_colors.HexColor('#334155'))
+            truncated_fb = (attempt.feedback[:5000] + '…') if len(attempt.feedback) > 5000 else attempt.feedback
+            for chunk in truncated_fb.split('\n'):
+                if chunk.strip():
+                    story.append(Paragraph(chunk.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;'), fb_style))
+                else:
+                    story.append(Spacer(1, 0.1*cm))
+
+        doc.build(story)
+        student_name = attempt.student.full_name if attempt.student else 'etudiant'
+        session.close()
+
+        buffer.seek(0)
+        safe_sn = re.sub(r'[^\w\s-]', '', student_name).strip().replace(' ', '_')
+        return send_file(
+            buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f"rapport_{safe_sn}_attempt{attempt_id}.pdf"
+        )
+    except Exception as e:
+        print(f"❌ download_attempt_report_pdf {attempt_id}: {e}")
+        import traceback; traceback.print_exc()
+        try: session.close()
+        except: pass
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     print("\n" + "="*60)
     print("SYSTÈME DE NOTATION AVANCÉ - VERSION COMPLÈTE")

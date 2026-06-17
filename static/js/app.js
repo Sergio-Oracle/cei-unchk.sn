@@ -695,6 +695,9 @@ function loadNavigation() {
             <button class="nav-tab" onclick="loadExamCalendar()">
                 <i class="fas fa-calendar-alt"></i> Calendrier
             </button>
+            <button class="nav-tab" onclick="loadProfessorAnalytics()">
+                <i class="fas fa-chart-line"></i> Analytique
+            </button>
             <button class="nav-tab" onclick="loadTranscripts()">
                 <i class="fas fa-file-alt"></i> ${t('nav.transcripts')}
             </button>
@@ -11640,8 +11643,9 @@ async function showExamBilan(examId, examTitle) {
         const scoreColor  = s => s === null ? '#94a3b8' : s >= 10 ? '#10b981' : '#ef4444';
 
         const rows = (d.attempts || []).map(a => {
-            const sc   = statusColor[a.status] || '#94a3b8';
-            const sl   = statusLabel[a.status]  || a.status;
+            const sc       = statusColor[a.status] || '#94a3b8';
+            const sl       = statusLabel[a.status]  || a.status;
+            const safeName = (a.student_name || '').replace(/'/g, "\\'");
             return `<tr style="border-bottom:1px solid #f1f5f9;">
                 <td style="padding:8px 10px;font-size:13px;font-weight:500;color:#0f172a">${escHtml(a.student_name)}</td>
                 <td style="padding:8px 10px;text-align:center;">
@@ -11655,7 +11659,16 @@ async function showExamBilan(examId, examTitle) {
                 <td style="padding:8px 10px;text-align:center;font-size:12px;color:${a.extra_minutes > 0 ? '#d97706' : '#94a3b8'};">${a.extra_minutes > 0 ? '+' + a.extra_minutes + ' min' : '—'}</td>
                 <td style="padding:8px 10px;text-align:center;font-size:12px;color:${a.note_count > 0 ? '#6366f1' : '#94a3b8'};">${a.note_count > 0 ? a.note_count + ' note(s)' : '—'}</td>
                 <td style="padding:8px 10px;text-align:center;">
-                    ${a.status === 'submitted' || a.status === 'auto_submitted' ? `<button class="btn btn-sm" onclick="viewMyExamResult(${a.attempt_id})" style="padding:3px 10px;font-size:11px;background:#ede9fe;color:#6366f1;border-radius:5px;">Voir</button>` : ''}
+                    <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;">
+                        <button onclick="showAttemptReview(${a.attempt_id},'${safeName}')"
+                            style="padding:3px 9px;font-size:11px;background:#ede9fe;color:#6366f1;border:none;border-radius:5px;cursor:pointer;white-space:nowrap;">
+                            <i class="fas fa-eye"></i> Réviser
+                        </button>
+                        ${a.score != null ? `<button onclick="downloadAttemptReportPDF(${a.attempt_id},'${safeName}')"
+                            style="padding:3px 9px;font-size:11px;background:#f0fdf4;color:#16a34a;border:none;border-radius:5px;cursor:pointer;white-space:nowrap;">
+                            <i class="fas fa-file-pdf"></i> PDF
+                        </button>` : ''}
+                    </div>
                 </td>
             </tr>`;
         }).join('');
@@ -11675,16 +11688,20 @@ async function showExamBilan(examId, examTitle) {
                             <th style="padding:8px 10px;text-align:center;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Durée</th>
                             <th style="padding:8px 10px;text-align:center;font-size:11px;color:#d97706;font-weight:700;text-transform:uppercase;">Extra</th>
                             <th style="padding:8px 10px;text-align:center;font-size:11px;color:#6366f1;font-weight:700;text-transform:uppercase;">Notes surv.</th>
-                            <th style="padding:8px 10px;"></th>
+                            <th style="padding:8px 10px;text-align:center;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>${rows || '<tr><td colspan="8" style="text-align:center;padding:24px;color:#94a3b8;">Aucun participant</td></tr>'}</tbody>
                 </table>
             </div>
-            <div style="margin-top:14px;display:flex;justify-content:flex-end;">
+            <div style="margin-top:14px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
+                <button onclick="downloadCorrectionsZip(${examId},'${(d.exam_title||examTitle||'').replace(/'/g,'')}')"
+                    style="background:#0369a1;color:white;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;">
+                    <i class="fas fa-file-archive"></i> ZIP copies
+                </button>
                 <button onclick="downloadBilanPDF(${examId},'${(d.exam_title||examTitle||'').replace(/'/g,'')}')"
                     style="background:#1e293b;color:white;border:none;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;">
-                    <i class="fas fa-file-pdf"></i> Télécharger PDF
+                    <i class="fas fa-file-pdf"></i> PDF Bilan
                 </button>
             </div>
         </div>`;
@@ -12039,4 +12056,266 @@ async function _calShowExam(examId) {
         </div>
     </div>`;
     showModal(html);
+}
+
+
+// ============================================================================
+// RÉVISION DÉTAILLÉE D'UNE TENTATIVE
+// ============================================================================
+
+async function showAttemptReview(attemptId, studentName) {
+    showLoader(true);
+    try {
+        const r = await authenticatedFetch(`/api/exam_attempts/${attemptId}/review`);
+        const d = await r.json();
+
+        const scoreColor = (d.score != null && d.score >= 10) ? '#10b981' : '#ef4444';
+        const riskColor  = d.risk_score >= 70 ? '#ef4444' : d.risk_score >= 40 ? '#f59e0b' : '#10b981';
+
+        const badge = (label, val, bg, fg='white') =>
+            `<span style="background:${bg}22;color:${bg};padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700;border:1px solid ${bg}44;">${label}: ${val}</span>`;
+
+        const incidentTypes = { tab_switch:'Changement onglet', copy_attempt:'Copier', paste_attempt:'Coller',
+            right_click:'Clic droit', devtools:'Outils dev', no_face:'Visage absent',
+            face_mismatch:'Visage différent', suspicious_audio:'Audio suspect' };
+
+        const incRows = d.incidents.slice(-20).map(inc => {
+            const ts = inc.timestamp ? new Date(inc.timestamp).toLocaleTimeString('fr-FR') : '—';
+            const label = incidentTypes[inc.type] || inc.type;
+            return `<tr><td style="padding:4px 8px;font-size:11px;color:#64748b;">${ts}</td>
+                    <td style="padding:4px 8px;font-size:11px;font-weight:600;color:#ef4444;">${label}</td></tr>`;
+        }).join('') || `<tr><td colspan="2" style="padding:8px;font-size:12px;color:#94a3b8;">Aucun incident</td></tr>`;
+
+        const noteRows = d.proctor_notes.map(n => {
+            const ts = n.timestamp ? new Date(n.timestamp).toLocaleString('fr-FR') : '—';
+            return `<div style="background:#fef3c7;border-left:3px solid #f59e0b;padding:8px 12px;margin-bottom:8px;border-radius:0 6px 6px 0;">
+                <div style="font-size:11px;color:#92400e;font-weight:700;">${escHtml(n.author || '—')} — ${ts}</div>
+                <div style="font-size:12px;color:#78350f;margin-top:2px;">${escHtml(n.note)}</div>
+            </div>`;
+        }).join('') || '<p style="color:#94a3b8;font-size:12px;">Aucune note</p>';
+
+        const answerHtml = d.student_answer
+            ? `<pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:12px;color:#334155;background:#f8fafc;padding:12px;border-radius:8px;max-height:250px;overflow-y:auto;border:1px solid #e2e8f0;">${escHtml(d.student_answer.substring(0,3000))}${d.student_answer.length>3000?'\n…(tronqué)':''}</pre>`
+            : '<p style="color:#94a3b8;font-size:12px;">Réponse non disponible</p>';
+
+        const feedbackHtml = d.feedback
+            ? `<pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:12px;color:#334155;background:#f0f9ff;padding:12px;border-radius:8px;max-height:250px;overflow-y:auto;border:1px solid #bae6fd;">${escHtml(d.feedback.substring(0,4000))}${d.feedback.length>4000?'\n…(tronqué)':''}</pre>`
+            : '<p style="color:#94a3b8;font-size:12px;">Pas encore corrigé</p>';
+
+        const duration = d.duration_min != null ? `${d.duration_min} min` : '—';
+
+        showModal(`
+        <div style="max-width:760px;">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;gap:12px;flex-wrap:wrap;">
+                <div>
+                    <h2 style="margin:0 0 4px;font-size:16px;"><i class="fas fa-user-graduate" style="color:#6366f1;margin-right:8px;"></i>${escHtml(d.student_name)}</h2>
+                    <p style="color:#64748b;margin:0;font-size:12px;">${escHtml(d.exam_title)}</p>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    ${d.score != null ? badge('Note', d.score+'/20', scoreColor) : ''}
+                    ${badge('Risque', d.risk_score+'%', riskColor)}
+                    ${badge('Durée', duration, '#6366f1')}
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+                <!-- Incidents -->
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;">
+                    <h4 style="margin:0 0 8px;font-size:12px;font-weight:700;color:#ef4444;text-transform:uppercase;letter-spacing:.05em;">
+                        <i class="fas fa-exclamation-triangle"></i> Incidents (${d.incidents.length})
+                    </h4>
+                    <div style="font-size:11px;color:#64748b;margin-bottom:6px;">
+                        ${d.tab_switches} fenêtre · ${d.warnings_count} avert. · ${d.no_face_count} sans-visage
+                        ${d.extra_minutes ? ` · +${d.extra_minutes} min extra` : ''}
+                    </div>
+                    <table style="width:100%;">${incRows}</table>
+                    ${d.ban_reason ? `<div style="background:#fef2f2;border-radius:6px;padding:8px;margin-top:8px;font-size:11px;color:#dc2626;"><b>Exclu :</b> ${escHtml(d.ban_reason)}</div>` : ''}
+                </div>
+                <!-- Notes surveillant -->
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;">
+                    <h4 style="margin:0 0 8px;font-size:12px;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.05em;">
+                        <i class="fas fa-sticky-note"></i> Notes surveillant (${d.proctor_notes.length})
+                    </h4>
+                    ${noteRows}
+                </div>
+            </div>
+            <!-- Réponse -->
+            <div style="margin-bottom:12px;">
+                <h4 style="margin:0 0 6px;font-size:12px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:.05em;">Réponse étudiant</h4>
+                ${answerHtml}
+            </div>
+            <!-- Correction -->
+            <div style="margin-bottom:16px;">
+                <h4 style="margin:0 0 6px;font-size:12px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:.05em;">Correction IA</h4>
+                ${feedbackHtml}
+            </div>
+            <div style="text-align:right;display:flex;gap:10px;justify-content:flex-end;">
+                <button onclick="downloadAttemptReportPDF(${attemptId},'${(d.student_name||'').replace(/'/g,"\\'")}');closeModal();"
+                    style="padding:8px 18px;background:#6366f1;color:white;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">
+                    <i class="fas fa-file-pdf"></i> Rapport PDF
+                </button>
+                <button onclick="closeModal()" style="padding:8px 18px;background:#f1f5f9;color:#475569;border:none;border-radius:8px;cursor:pointer;font-size:13px;">Fermer</button>
+            </div>
+        </div>`, '800px');
+    } catch(e) {
+        showAlert('Erreur révision : ' + (e.serverMessage || e.message), 'error');
+    } finally { showLoader(false); }
+}
+
+
+// ============================================================================
+// TÉLÉCHARGEMENT ZIP DES COPIES CORRIGÉES
+// ============================================================================
+
+async function downloadCorrectionsZip(examId, examTitle) {
+    showLoader(true);
+    try {
+        const r = await authenticatedFetch(`/api/online_exams/${examId}/corrections/zip`);
+        if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.error || 'Erreur téléchargement ZIP');
+        }
+        const blob = await r.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = `corrections_${(examTitle||'exam').replace(/[^a-z0-9]/gi,'_')}.zip`;
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showAlert('ZIP téléchargé avec succès.', 'success');
+    } catch(e) {
+        showAlert('Erreur ZIP : ' + (e.serverMessage || e.message), 'error');
+    } finally { showLoader(false); }
+}
+
+
+// ============================================================================
+// PDF RAPPORT INDIVIDUEL PAR TENTATIVE
+// ============================================================================
+
+async function downloadAttemptReportPDF(attemptId, studentName) {
+    showLoader(true);
+    try {
+        const r = await authenticatedFetch(`/api/exam_attempts/${attemptId}/report/pdf`);
+        if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.error || 'Erreur rapport PDF');
+        }
+        const blob = await r.blob();
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = `rapport_${(studentName||'etudiant').replace(/[^a-z0-9]/gi,'_')}_${attemptId}.pdf`;
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch(e) {
+        showAlert('Erreur rapport : ' + (e.serverMessage || e.message), 'error');
+    } finally { showLoader(false); }
+}
+
+
+// ============================================================================
+// DASHBOARD ANALYTIQUE PROF
+// ============================================================================
+
+async function loadProfessorAnalytics() {
+    if (window.event && window.event.target) setActiveTab(window.event.target);
+    showLoader(true);
+    try {
+        const r = await authenticatedFetch('/api/professor/analytics');
+        const d = await r.json();
+
+        const kpi = (label, val, color='#1e293b', sub='') =>
+            `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;flex:1;min-width:130px;">
+                <div style="font-size:24px;font-weight:800;color:${color};">${val ?? '—'}</div>
+                <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-top:2px;">${label}</div>
+                ${sub ? `<div style="font-size:11px;color:#94a3b8;margin-top:4px;">${sub}</div>` : ''}
+             </div>`;
+
+        const statusColors = { active:'#10b981', scheduled:'#3b82f6', closed:'#94a3b8', draft:'#f59e0b' };
+
+        const statusDots = Object.entries(d.status_counts||{}).map(([s,n]) =>
+            `<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#475569;margin-right:14px;">
+                <span style="width:10px;height:10px;background:${statusColors[s]||'#94a3b8'};border-radius:50%;"></span>${s} <b>${n}</b>
+             </span>`
+        ).join('');
+
+        const examRankRow = (exam, medal) =>
+            `<tr onclick="loadOnlineExams()" style="cursor:pointer;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                <td style="padding:8px 10px;font-size:13px;">${medal} ${escHtml(exam.title)}</td>
+                <td style="padding:8px 10px;font-size:13px;font-weight:700;color:${(exam.avg_score||0)>=10?'#10b981':'#ef4444'};">${exam.avg_score}/20</td>
+                <td style="padding:8px 10px;font-size:12px;color:#64748b;">${exam.pass_rate}%</td>
+                <td style="padding:8px 10px;font-size:12px;color:#64748b;">${exam.corrected} copie(s)</td>
+             </tr>`;
+
+        const topRows = (d.top_exams||[]).map((e,i) => examRankRow(e, ['🥇','🥈','🥉'][i]||'•')).join('');
+        const botRows = (d.bottom_exams||[]).map((e,i) => examRankRow(e, ['⬇️','⬇️','⬇️'][i]||'•')).join('');
+
+        const recentRows = (d.recent_corrections||[]).map(c => {
+            const sc = c.score != null ? c.score : null;
+            const dt = c.corrected_at ? new Date(c.corrected_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+            return `<tr>
+                <td style="padding:7px 10px;font-size:12px;">${escHtml(c.student_name)}</td>
+                <td style="padding:7px 10px;font-size:12px;color:#64748b;">${escHtml(c.exam_title)}</td>
+                <td style="padding:7px 10px;font-size:12px;font-weight:700;color:${sc!=null&&sc>=10?'#10b981':'#ef4444'};">${sc != null ? sc+'/20' : '—'}</td>
+                <td style="padding:7px 10px;font-size:11px;color:#94a3b8;">${dt}</td>
+             </tr>`;
+        }).join('') || `<tr><td colspan="4" style="padding:12px;color:#94a3b8;text-align:center;">Aucune correction récente</td></tr>`;
+
+        const avgColor = d.overall_avg != null ? (d.overall_avg >= 10 ? '#10b981' : '#ef4444') : '#1e293b';
+        const prColor  = d.overall_pass_rate != null ? (d.overall_pass_rate >= 50 ? '#10b981' : '#f59e0b') : '#1e293b';
+
+        document.getElementById('main-content').innerHTML = `
+        <div class="page-header">
+            <h2><i class="fas fa-chart-line" style="color:#6366f1;margin-right:10px;"></i>Tableau de bord analytique</h2>
+            <p style="color:#64748b;margin:4px 0 0;">${statusDots}</p>
+        </div>
+        <!-- KPI Row -->
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;">
+            ${kpi('Examens', d.total_exams, '#6366f1')}
+            ${kpi('Tentatives', d.total_attempts, '#0ea5e9')}
+            ${kpi('Soumissions', d.total_submitted, '#8b5cf6')}
+            ${kpi('Copies corrigées', d.total_corrected, '#10b981')}
+            ${kpi('Moyenne globale', d.overall_avg != null ? d.overall_avg+'/20' : '—', avgColor)}
+            ${kpi('Taux réussite', d.overall_pass_rate != null ? d.overall_pass_rate+'%' : '—', prColor)}
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+            <!-- Top exams -->
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;">
+                <h3 style="margin:0 0 12px;font-size:13px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:.05em;">
+                    <i class="fas fa-trophy" style="color:#f59e0b;margin-right:6px;"></i>Meilleurs examens
+                </h3>
+                ${topRows ? `<table style="width:100%;border-collapse:collapse;">${topRows}</table>` : '<p style="color:#94a3b8;font-size:12px;">Pas encore de données (min. 2 copies corrigées)</p>'}
+            </div>
+            <!-- Bottom exams -->
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;">
+                <h3 style="margin:0 0 12px;font-size:13px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:.05em;">
+                    <i class="fas fa-arrow-down" style="color:#ef4444;margin-right:6px;"></i>Examens à améliorer
+                </h3>
+                ${botRows ? `<table style="width:100%;border-collapse:collapse;">${botRows}</table>` : '<p style="color:#94a3b8;font-size:12px;">Pas encore de données (min. 2 copies corrigées)</p>'}
+            </div>
+        </div>
+
+        <!-- Corrections récentes -->
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;">
+            <h3 style="margin:0 0 12px;font-size:13px;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:.05em;">
+                <i class="fas fa-clock" style="color:#6366f1;margin-right:6px;"></i>Corrections récentes (10 dernières)
+            </h3>
+            <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                    <tr style="background:#f8fafc;">
+                        <th style="padding:8px 10px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Étudiant</th>
+                        <th style="padding:8px 10px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Examen</th>
+                        <th style="padding:8px 10px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Note</th>
+                        <th style="padding:8px 10px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Date</th>
+                    </tr>
+                </thead>
+                <tbody>${recentRows}</tbody>
+            </table>
+        </div>`;
+    } catch(e) {
+        showAlert('Erreur analytique : ' + (e.serverMessage || e.message), 'error');
+    } finally { showLoader(false); }
 }
