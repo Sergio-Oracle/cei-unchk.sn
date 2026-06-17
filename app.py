@@ -2744,11 +2744,57 @@ def get_subject_statistics(subject_id):
             session.close()
             return jsonify({'error': 'Vous ne pouvez voir que les statistiques de vos propres sujets'}), 403
 
+        # ── Copies papier ────────────────────────────────────────────────────────
         papers = session.query(StudentPaper).options(
             joinedload(StudentPaper.student)
         ).filter_by(subject_id=subject_id).all()
 
-        if not papers:
+        papers_details = []
+        for p in papers:
+            if p.score is not None:
+                papers_details.append({
+                    'id': p.id,
+                    'student_name':  p.student.full_name if p.student else 'Inconnu',
+                    'student_email': p.student.email if p.student else 'N/A',
+                    'score': p.score,
+                    'corrected_at': p.corrected_at.isoformat() if p.corrected_at else None,
+                    'filename': p.filename,
+                    'type': 'paper'
+                })
+
+        # ── Examens en ligne liés à ce sujet ────────────────────────────────────
+        online_exams = session.query(OnlineExam).filter_by(subject_id=subject_id).all()
+        online_exam_ids = [e.id for e in online_exams]
+
+        attempts_details = []
+        if online_exam_ids:
+            attempts = session.query(ExamAttempt).options(
+                joinedload(ExamAttempt.student),
+                joinedload(ExamAttempt.exam)
+            ).filter(
+                ExamAttempt.exam_id.in_(online_exam_ids),
+                ExamAttempt.score.isnot(None)
+            ).all()
+
+            for att in attempts:
+                attempts_details.append({
+                    'id': att.id,
+                    'student_name':  att.student.full_name if att.student else 'Inconnu',
+                    'student_email': att.student.email if att.student else 'N/A',
+                    'score': att.score,
+                    'corrected_at': att.corrected_at.isoformat() if att.corrected_at else (att.submitted_at.isoformat() if att.submitted_at else None),
+                    'exam_title': att.exam.title if att.exam else '—',
+                    'type': 'online'
+                })
+
+        # ── Stats globales (papier + online) ────────────────────────────────────
+        all_entries = papers_details + attempts_details
+        online_exams_info = [{'id': e.id, 'title': e.title, 'status': e.status.value,
+                               'start_time': e.start_time.isoformat() if e.start_time else None,
+                               'attempts_count': len([a for a in attempts_details if a['exam_title'] == e.title])}
+                              for e in online_exams] if online_exams else []
+
+        if not all_entries:
             session.close()
             return jsonify({
                 'subject_id': subject_id,
@@ -2761,59 +2807,32 @@ def get_subject_statistics(subject_id):
                 'stdDeviation': 0,
                 'passRate': 0,
                 'scoreDistribution': {'0-5': 0, '5-10': 0, '10-15': 0, '15-20': 0},
-                'papers': []
+                'papers': [],
+                'attempts': [],
+                'online_exams': online_exams_info,
             })
 
-        scores = [p.score for p in papers if p.score is not None]
-
-        if not scores:
-            session.close()
-            return jsonify({
-                'subject_id': subject_id,
-                'subject_title': subject.title,
-                'totalStudents': len(papers),
-                'averageScore': 0,
-                'medianScore': 0,
-                'minScore': 0,
-                'maxScore': 0,
-                'stdDeviation': 0,
-                'passRate': 0,
-                'scoreDistribution': {'0-5': 0, '5-10': 0, '10-15': 0, '15-20': 0},
-                'papers': []
-            })
-
+        scores = [e['score'] for e in all_entries]
         scores_sorted = sorted(scores)
-        average = sum(scores) / len(scores)
-        median = scores_sorted[len(scores_sorted) // 2] if len(scores_sorted) % 2 == 1 else (scores_sorted[len(scores_sorted) // 2 - 1] + scores_sorted[len(scores_sorted) // 2]) / 2
+        average  = sum(scores) / len(scores)
+        n = len(scores_sorted)
+        median   = scores_sorted[n // 2] if n % 2 == 1 else (scores_sorted[n // 2 - 1] + scores_sorted[n // 2]) / 2
         min_score = min(scores)
         max_score = max(scores)
-        std_dev = statistics.stdev(scores) if len(scores) > 1 else 0
+        std_dev   = statistics.stdev(scores) if len(scores) > 1 else 0
         pass_rate = (sum(1 for s in scores if s >= 10) / len(scores)) * 100
-
         distribution = {
-            '0-5': sum(1 for s in scores if 0 <= s < 5),
-            '5-10': sum(1 for s in scores if 5 <= s < 10),
+            '0-5':   sum(1 for s in scores if 0  <= s <  5),
+            '5-10':  sum(1 for s in scores if 5  <= s < 10),
             '10-15': sum(1 for s in scores if 10 <= s < 15),
             '15-20': sum(1 for s in scores if 15 <= s <= 20)
         }
 
-        papers_details = []
-        for paper in papers:
-            papers_details.append({
-                'id': paper.id,
-                'student_name': paper.student.full_name if paper.student else 'Inconnu',
-                'student_email': paper.student.email if paper.student else 'N/A',
-                'score': paper.score,
-                'corrected_at': paper.corrected_at.isoformat() if paper.corrected_at else None,
-                'filename': paper.filename
-            })
-
         session.close()
-
         return jsonify({
             'subject_id': subject_id,
             'subject_title': subject.title,
-            'totalStudents': len(papers),
+            'totalStudents': len(all_entries),
             'averageScore': round(average, 2),
             'medianScore': round(median, 2),
             'minScore': min_score,
@@ -2821,7 +2840,9 @@ def get_subject_statistics(subject_id):
             'stdDeviation': round(std_dev, 2),
             'passRate': round(pass_rate, 2),
             'scoreDistribution': distribution,
-            'papers': papers_details
+            'papers': papers_details,
+            'attempts': attempts_details,
+            'online_exams': online_exams_info,
         })
 
     except Exception as e:

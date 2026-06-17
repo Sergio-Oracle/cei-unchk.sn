@@ -2578,124 +2578,118 @@ async function loadViewResults() {
 
 async function viewSubjectStatistics(subjectId) {
     showLoader(true);
-    
+
     try {
         const response = await authenticatedFetch(`/api/statistics/${subjectId}`);
         const stats = await response.json();
-        
+
         const statsContainer = document.getElementById('statistics-container');
-        
-        if (!stats || stats.totalStudents === 0) {
+        const hasPapers   = stats.papers   && stats.papers.length   > 0;
+        const hasAttempts = stats.attempts && stats.attempts.length > 0;
+
+        if (stats.totalStudents === 0) {
+            const hasOnlineExams = stats.online_exams && stats.online_exams.length > 0;
             statsContainer.innerHTML = `
                 <div class="card">
                     <div class="card-header">
-                        <h3><i class="fas fa-chart-pie"></i> Statistiques - ${stats.subject_title}</h3>
+                        <h3><i class="fas fa-chart-pie"></i> Statistiques — ${stats.subject_title}</h3>
                     </div>
-                    <div class="alert alert-info">
+                    <div class="alert alert-info" style="margin:16px;">
                         <i class="fas fa-info-circle"></i>
-                        <div>Aucune copie corrigée pour ce sujet.</div>
+                        <div>Aucune copie corrigée pour ce sujet.
+                        ${hasOnlineExams ? `<br><small>${stats.online_exams.length} examen(s) en ligne associé(s) — aucune tentative corrigée.</small>` : ''}</div>
                     </div>
-                </div>
-            `;
+                </div>`;
             statsContainer.style.display = 'block';
             showLoader(false);
             return;
         }
-        
-        // Créer le tableau des copies
-        let papersHTML = stats.papers.map(p => {
-            const scoreClass = p.score >= 10 ? 'success' : 'danger';
-            return `
-                <tr>
-                    <td>${p.student_name}</td>
-                    <td>${p.student_email}</td>
-                    <td><span class="status-badge ${scoreClass}">${p.score}/20</span></td>
-                    <td><i class="fas fa-calendar"></i> ${new Date(p.corrected_at).toLocaleDateString('fr-FR')}</td>
-                </tr>
-            `;
-        }).join('');
-        
+
+        const scoreColor = s => s >= 10 ? '#10b981' : '#ef4444';
+        const fmtDate = d => d ? new Date(d).toLocaleDateString('fr-FR') : '—';
+
+        // ── Tableaux détail ──────────────────────────────────────────────────────
+        const papersTableHTML = hasPapers ? `
+            <div style="margin-top:24px;">
+                <h4 style="font-size:14px;font-weight:700;color:#374151;margin-bottom:10px;">
+                    <i class="fas fa-file-alt" style="color:#6366f1;margin-right:6px;"></i>Copies Papier (${stats.papers.length})
+                </h4>
+                <table><thead><tr>
+                    <th>Étudiant</th><th>Email</th><th>Note</th><th>Corrigé le</th>
+                </tr></thead><tbody>
+                ${stats.papers.map(p => `<tr>
+                    <td>${p.student_name}</td><td>${p.student_email}</td>
+                    <td><span style="font-weight:700;color:${scoreColor(p.score)}">${p.score}/20</span></td>
+                    <td>${fmtDate(p.corrected_at)}</td>
+                </tr>`).join('')}
+                </tbody></table>
+            </div>` : '';
+
+        const attemptsTableHTML = hasAttempts ? `
+            <div style="margin-top:24px;">
+                <h4 style="font-size:14px;font-weight:700;color:#374151;margin-bottom:10px;">
+                    <i class="fas fa-laptop-code" style="color:#3b82f6;margin-right:6px;"></i>Examens en Ligne (${stats.attempts.length})
+                </h4>
+                <table><thead><tr>
+                    <th>Étudiant</th><th>Email</th><th>Examen</th><th>Note</th><th>Date</th>
+                </tr></thead><tbody>
+                ${stats.attempts.map(a => `<tr>
+                    <td>${a.student_name}</td><td>${a.student_email}</td>
+                    <td style="font-size:12px;color:#64748b;">${a.exam_title}</td>
+                    <td><span style="font-weight:700;color:${scoreColor(a.score)}">${a.score}/20</span></td>
+                    <td>${fmtDate(a.corrected_at)}</td>
+                </tr>`).join('')}
+                </tbody></table>
+            </div>` : '';
+
         statsContainer.innerHTML = `
-            <div class="card">
-                <div class="card-header">
-                    <h3><i class="fas fa-chart-pie"></i> Statistiques - ${stats.subject_title}</h3>
+            <div class="card" style="padding:0;">
+                <div class="card-header" style="padding:16px 20px;border-bottom:1px solid #f1f5f9;">
+                    <h3 style="margin:0;font-size:17px;"><i class="fas fa-chart-pie" style="color:#6366f1;margin-right:8px;"></i>${stats.subject_title}</h3>
                 </div>
-                
-                <div class="grid" style="margin-bottom: 20px;">
-                    <div class="stat-card">
-                        <div class="stat-label"><i class="fas fa-users"></i> Total Étudiants</div>
-                        <div class="stat-value">${stats.totalStudents}</div>
+                <div style="padding:20px;">
+
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:20px;">
+                        ${[
+                            ['fas fa-users','#6366f1','Total','rgba(99,102,241,.1)', stats.totalStudents],
+                            ['fas fa-chart-line','#10b981','Moyenne','rgba(16,185,129,.1)', stats.averageScore+'/20'],
+                            ['fas fa-sort-numeric-up','#f59e0b','Médiane','rgba(245,158,11,.1)', stats.medianScore+'/20'],
+                            ['fas fa-arrow-down','#ef4444','Min','rgba(239,68,68,.1)', stats.minScore+'/20'],
+                            ['fas fa-arrow-up','#3b82f6','Max','rgba(59,130,246,.1)', stats.maxScore+'/20'],
+                            ['fas fa-percentage','#059669','Réussite','rgba(5,150,105,.1)', stats.passRate+'%'],
+                        ].map(([icon,color,label,bg,val]) => `
+                            <div style="background:white;border:1px solid #f1f5f9;border-radius:10px;padding:14px 12px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.04);">
+                                <div style="width:36px;height:36px;background:${bg};border-radius:9px;display:flex;align-items:center;justify-content:center;margin:0 auto 8px;">
+                                    <i class="${icon}" style="color:${color};font-size:15px;"></i>
+                                </div>
+                                <div style="font-size:20px;font-weight:800;color:#0f172a;">${val}</div>
+                                <div style="font-size:11px;color:#64748b;margin-top:2px;">${label}</div>
+                            </div>`).join('')}
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-label"><i class="fas fa-chart-line"></i> Moyenne</div>
-                        <div class="stat-value">${stats.averageScore}/20</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label"><i class="fas fa-sort-amount-up"></i> Médiane</div>
-                        <div class="stat-value">${stats.medianScore}/20</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label"><i class="fas fa-arrow-down"></i> Note Min</div>
-                        <div class="stat-value">${stats.minScore}/20</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label"><i class="fas fa-arrow-up"></i> Note Max</div>
-                        <div class="stat-value">${stats.maxScore}/20</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label"><i class="fas fa-percentage"></i> Taux de Réussite</div>
-                        <div class="stat-value">${stats.passRate}%</div>
-                    </div>
-                </div>
-                
-                <div class="card-header">
-                    <h4><i class="fas fa-chart-bar"></i> Distribution des Notes</h4>
-                </div>
-                <div style="padding: 20px;">
-                    <div style="display: flex; gap: 20px; justify-content: space-around; flex-wrap: wrap;">
-                        <div style="text-align: center;">
-                            <div style="font-size: 32px; font-weight: bold; color: #ef4444;">${stats.scoreDistribution['0-5']}</div>
-                            <div style="color: #64748b;">0-5</div>
-                        </div>
-                        <div style="text-align: center;">
-                            <div style="font-size: 32px; font-weight: bold; color: #f59e0b;">${stats.scoreDistribution['5-10']}</div>
-                            <div style="color: #64748b;">5-10</div>
-                        </div>
-                        <div style="text-align: center;">
-                            <div style="font-size: 32px; font-weight: bold; color: #10b981;">${stats.scoreDistribution['10-15']}</div>
-                            <div style="color: #64748b;">10-15</div>
-                        </div>
-                        <div style="text-align: center;">
-                            <div style="font-size: 32px; font-weight: bold; color: #3b82f6;">${stats.scoreDistribution['15-20']}</div>
-                            <div style="color: #64748b;">15-20</div>
+
+                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:4px;">
+                        <p style="margin:0 0 12px;font-size:13px;font-weight:700;color:#374151;">
+                            <i class="fas fa-chart-bar" style="margin-right:6px;color:#6366f1;"></i>Distribution des notes
+                        </p>
+                        <div style="display:flex;gap:16px;justify-content:space-around;flex-wrap:wrap;">
+                            ${[['0-5','#ef4444'],['5-10','#f59e0b'],['10-15','#10b981'],['15-20','#3b82f6']].map(([r,c]) => `
+                            <div style="text-align:center;">
+                                <div style="font-size:28px;font-weight:800;color:${c};">${stats.scoreDistribution[r]}</div>
+                                <div style="font-size:12px;color:#64748b;">${r}</div>
+                            </div>`).join('')}
                         </div>
                     </div>
+
+                    ${papersTableHTML}
+                    ${attemptsTableHTML}
                 </div>
-                
-                <div class="card-header">
-                    <h4><i class="fas fa-list"></i> Détail des Copies</h4>
-                </div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th><i class="fas fa-user"></i> Étudiant</th>
-                            <th><i class="fas fa-envelope"></i> Email</th>
-                            <th><i class="fas fa-star"></i> Note</th>
-                            <th><i class="fas fa-calendar"></i> Date Correction</th>
-                        </tr>
-                    </thead>
-                    <tbody>${papersHTML}</tbody>
-                </table>
-            </div>
-        `;
-        
+            </div>`;
+
         statsContainer.style.display = 'block';
-        
-        // Scroll vers les statistiques
         statsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        
+
     } catch (error) {
-        showAlert('Impossible de charger les statistiques de ce sujet. Veuillez réessayer.', 'error');
+        showAlert(humanError(error), 'error');
     } finally {
         showLoader(false);
     }
