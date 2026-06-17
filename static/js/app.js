@@ -5953,12 +5953,14 @@ async function loadOnlineExams() {
             html += `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:20px;">`;
 
             exams.forEach(exam => {
-                const sc = statusConfig[exam.status] || statusConfig['draft'];
                 const now = new Date();
                 const startTime = new Date(exam.start_time);
                 const endTime = new Date(exam.end_time);
                 const isAvailableNow = now >= startTime && now <= endTime;
-                const canCompose = (exam.status === 'active' || (exam.status === 'scheduled' && isAvailableNow));
+                // Statut effectif côté client : si active mais end_time passé → closed
+                const effectiveStatus = (exam.status === 'active' && now > endTime) ? 'closed' : exam.status;
+                const sc = statusConfig[effectiveStatus] || statusConfig['draft'];
+                const canCompose = isAvailableNow && (exam.status === 'active' || exam.status === 'scheduled');
                 const safeTitle = (exam.title || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
                 const startStr = startTime.toLocaleString('fr-FR', fmtOpts);

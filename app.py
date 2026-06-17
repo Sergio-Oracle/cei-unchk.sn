@@ -3405,6 +3405,27 @@ def get_online_exams():
             student_attempts = session.query(ExamAttempt).filter_by(student_id=user_id).all()
             attempts_by_exam = {a.exam_id: a for a in student_attempts}
 
+        # Auto-close exams whose end_time has passed
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        needs_commit = False
+        for exam in exams:
+            if exam.status == ExamStatus.ACTIVE and exam.end_time and exam.end_time < now_utc:
+                exam.status = ExamStatus.CLOSED
+                in_progress = session.query(ExamAttempt).filter_by(
+                    exam_id=exam.id, status=AttemptStatus.IN_PROGRESS
+                ).all()
+                for att in in_progress:
+                    att.status = AttemptStatus.AUTO_SUBMITTED
+                    att.submitted_at = now_utc
+                needs_commit = True
+                print(f"⏰ Auto-close examen #{exam.id} '{exam.title}' (end_time dépassé)")
+        if needs_commit:
+            session.commit()
+            # Recharger les tentatives après commit
+            if user.role == UserRole.STUDENT:
+                student_attempts = session.query(ExamAttempt).filter_by(student_id=user_id).all()
+                attempts_by_exam = {a.exam_id: a for a in student_attempts}
+
         exams_list = []
         for exam in exams:
             d = exam.to_dict()
