@@ -5956,7 +5956,7 @@ def create_student_no_email():
 @app.route('/api/professor/corrected_papers', methods=['GET'])
 @jwt_required()
 def professor_corrected_papers():
-    """Liste des copies corrigées par le professeur connecté"""
+    """Liste des copies corrigées : copies papier + examens en ligne"""
     try:
         user_id = int(get_jwt_identity())
         session = get_session()
@@ -5966,22 +5966,23 @@ def professor_corrected_papers():
             session.close()
             return jsonify({'error': 'Accès non autorisé'}), 403
 
-        # Filtrer par professeur si pas admin
-        query = session.query(StudentPaper).options(
+        # ── Copies papier ────────────────────────────────────────────────────
+        paper_query = session.query(StudentPaper).options(
             joinedload(StudentPaper.student),
             joinedload(StudentPaper.subject)
         ).filter(StudentPaper.corrected_at != None)
 
         if user.role == UserRole.PROFESSOR:
-            query = query.filter(StudentPaper.corrected_by_id == user_id)
+            paper_query = paper_query.filter(StudentPaper.corrected_by_id == user_id)
 
-        papers = query.order_by(StudentPaper.corrected_at.desc()).limit(100).all()
+        papers = paper_query.order_by(StudentPaper.corrected_at.desc()).limit(100).all()
 
         papers_list = []
         for p in papers:
             papers_list.append({
                 'id': p.id,
-                'student_name': p.student.full_name if p.student else 'Inconnu',
+                'type': 'paper',
+                'student_name':  p.student.full_name if p.student else 'Inconnu',
                 'student_email': p.student.email if p.student and p.student.has_email else 'Pas d\'email',
                 'subject_title': p.subject.title if p.subject else 'N/A',
                 'score': p.score,
@@ -5990,9 +5991,38 @@ def professor_corrected_papers():
                 'filename': p.filename
             })
 
+        # ── Examens en ligne corrigés ────────────────────────────────────────
+        attempt_query = session.query(ExamAttempt).options(
+            joinedload(ExamAttempt.student),
+            joinedload(ExamAttempt.exam).joinedload(OnlineExam.subject)
+        ).join(OnlineExam, ExamAttempt.exam_id == OnlineExam.id).filter(
+            ExamAttempt.score.isnot(None)
+        )
+
+        if user.role == UserRole.PROFESSOR:
+            attempt_query = attempt_query.filter(OnlineExam.created_by_id == user_id)
+
+        attempts = attempt_query.order_by(ExamAttempt.corrected_at.desc()).limit(100).all()
+
+        for att in attempts:
+            papers_list.append({
+                'id': att.id,
+                'type': 'online',
+                'student_name':  att.student.full_name if att.student else 'Inconnu',
+                'student_email': att.student.email if att.student else 'Pas d\'email',
+                'subject_title': att.exam.title if att.exam else 'Examen en ligne',
+                'score': att.score,
+                'corrected_at': (att.corrected_at or att.submitted_at).isoformat() if (att.corrected_at or att.submitted_at) else None,
+                'email_sent': False,
+                'exam_id': att.exam_id
+            })
+
+        # Tri global par date décroissante
+        papers_list.sort(key=lambda x: x['corrected_at'] or '', reverse=True)
+
         session.close()
         return jsonify({'papers': papers_list})
-        
+
     except Exception as e:
         print(f"❌ Erreur professor_corrected_papers: {e}")
         return jsonify({'error': str(e)}), 500

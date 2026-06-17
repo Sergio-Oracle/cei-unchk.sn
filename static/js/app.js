@@ -9739,69 +9739,68 @@ async function loadCorrectedPapersList() {
         const response = await authenticatedFetch(endpoint);
         const data = await response.json();
         
+        const total = data.papers ? data.papers.length : 0;
+        const totalPaper  = data.papers ? data.papers.filter(p => p.type === 'paper').length  : 0;
+        const totalOnline = data.papers ? data.papers.filter(p => p.type === 'online').length : 0;
+
         let html = `
             <div class="page-header">
                 <h2><i class="fas fa-check-circle"></i> Copies Corrigées</h2>
-                <p>${data.papers ? data.papers.length : 0} copie(s) corrigée(s)</p>
+                <p>${total} copie(s) corrigée(s)
+                   ${totalPaper  > 0 ? `<span style="margin-left:8px;background:#ede9fe;color:#6366f1;padding:2px 8px;border-radius:99px;font-size:12px;"><i class="fas fa-file-alt"></i> ${totalPaper} papier</span>` : ''}
+                   ${totalOnline > 0 ? `<span style="margin-left:4px;background:#dbeafe;color:#2563eb;padding:2px 8px;border-radius:99px;font-size:12px;"><i class="fas fa-laptop-code"></i> ${totalOnline} en ligne</span>` : ''}
+                </p>
             </div>
         `;
-        
-        if (!data.papers || data.papers.length === 0) {
-            html += `
-                <div class="alert alert-info">
-                    <i class="fas fa-info-circle"></i>
-                    <div>Aucune copie corrigée pour le moment</div>
-                </div>
-            `;
+
+        if (total === 0) {
+            html += `<div class="alert alert-info"><i class="fas fa-info-circle"></i><div>Aucune copie corrigée pour le moment</div></div>`;
         } else {
-            html += `
-                <div class="card">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th><i class="fas fa-user"></i> Étudiant</th>
-                                <th><i class="fas fa-envelope"></i> Email</th>
-                                <th><i class="fas fa-file-alt"></i> Sujet</th>
-                                <th><i class="fas fa-star"></i> Note</th>
-                                <th><i class="fas fa-calendar"></i> Corrigé le</th>
-                                <th><i class="fas fa-envelope-open"></i> Email</th>
-                                <th><i class="fas fa-cog"></i> Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-            `;
-            
+            html += `<div class="card"><table><thead><tr>
+                <th>Type</th>
+                <th><i class="fas fa-user"></i> Étudiant</th>
+                <th><i class="fas fa-envelope"></i> Email</th>
+                <th><i class="fas fa-file-alt"></i> Sujet / Examen</th>
+                <th><i class="fas fa-star"></i> Note</th>
+                <th><i class="fas fa-calendar"></i> Corrigé le</th>
+                <th><i class="fas fa-cog"></i> Actions</th>
+            </tr></thead><tbody>`;
+
             data.papers.forEach(p => {
-                const scoreClass = p.score >= 10 ? 'success' : 'danger';
-                const emailStatus = p.email_sent 
-                    ? '<span style="color: #10b981;"><i class="fas fa-check-circle"></i> Envoyé</span>'
-                    : '<span style="color: #94a3b8;"><i class="fas fa-times-circle"></i> Non envoyé</span>';
-                
-                html += `
-                    <tr>
-                        <td><strong>${p.student_name}</strong></td>
-                        <td>${p.student_email}</td>
-                        <td>${p.subject_title}</td>
-                        <td><span class="status-badge ${scoreClass}">${p.score}/20</span></td>
-                        <td>${new Date(p.corrected_at).toLocaleString('fr-FR')}</td>
-                        <td>${emailStatus}</td>
-                        <td>
-                            <button class="btn btn-sm btn-primary" onclick="viewPaperDetail(${p.id})">
-                                <i class="fas fa-eye"></i> Détail
-                            </button>
-                            <button class="btn btn-sm btn-success" onclick="exportPaperPDF(${p.id})">
-                                <i class="fas fa-file-pdf"></i> PDF
-                            </button>
-                        </td>
-                    </tr>
-                `;
+                const scoreColor = p.score >= 10 ? '#10b981' : '#ef4444';
+                const dateStr = p.corrected_at ? new Date(p.corrected_at).toLocaleString('fr-FR') : '—';
+                const safeName = (p.student_name || '').replace(/'/g, "\\'");
+
+                const typeBadge = p.type === 'online'
+                    ? `<span style="background:#dbeafe;color:#2563eb;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:600;"><i class="fas fa-laptop-code"></i> Ligne</span>`
+                    : `<span style="background:#ede9fe;color:#6366f1;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:600;"><i class="fas fa-file-alt"></i> Papier</span>`;
+
+                const actionBtns = p.type === 'online'
+                    ? `<button class="btn btn-sm btn-primary" onclick="showAttemptReview(${p.id},'${safeName}')">
+                           <i class="fas fa-eye"></i> Réviser
+                       </button>
+                       <button class="btn btn-sm btn-success" onclick="downloadAttemptReportPDF(${p.id},'${safeName}')">
+                           <i class="fas fa-file-pdf"></i> PDF
+                       </button>`
+                    : `<button class="btn btn-sm btn-primary" onclick="viewPaperDetail(${p.id})">
+                           <i class="fas fa-eye"></i> Détail
+                       </button>
+                       <button class="btn btn-sm btn-success" onclick="exportPaperPDF(${p.id})">
+                           <i class="fas fa-file-pdf"></i> PDF
+                       </button>`;
+
+                html += `<tr>
+                    <td>${typeBadge}</td>
+                    <td><strong>${p.student_name}</strong></td>
+                    <td style="font-size:12px;">${p.student_email}</td>
+                    <td>${p.subject_title}</td>
+                    <td><span style="font-weight:700;color:${scoreColor};">${p.score}/20</span></td>
+                    <td style="font-size:12px;">${dateStr}</td>
+                    <td style="display:flex;gap:5px;flex-wrap:wrap;">${actionBtns}</td>
+                </tr>`;
             });
-            
-            html += `
-                        </tbody>
-                    </table>
-                </div>
-            `;
+
+            html += `</tbody></table></div>`;
         }
         
         document.getElementById('main-content').innerHTML = html;
