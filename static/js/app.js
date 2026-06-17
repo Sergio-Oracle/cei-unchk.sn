@@ -5557,11 +5557,12 @@ async function showRespondReclamationModal(reclamationId) {
                                 <i class="fas fa-eye"></i> Voir la copie complète
                              </button>`;
         } else if (reclamation.attempt_id) {
-            const attResp = await authenticatedFetch(`/api/exam_attempts/${reclamation.attempt_id}/review`);
-            const att = await attResp.json();
-            currentScore = att.score || 0;
-            feedbackHtml = att.feedback || feedbackHtml;
-            viewDetailBtn = `<span style="font-size:12px;color:#64748b;"><i class="fas fa-laptop-code"></i> Examen en ligne — ${att.exam_title || ''}</span>`;
+            // Score et feedback déjà inclus dans l'objet réclamation (attempt_score / attempt_feedback)
+            currentScore = reclamation.attempt_score != null ? reclamation.attempt_score : 0;
+            feedbackHtml = reclamation.attempt_feedback || feedbackHtml;
+            viewDetailBtn = `<span style="font-size:12px;color:#64748b;">
+                <i class="fas fa-laptop-code"></i> Examen en ligne — ${reclamation.exam_title || reclamation.subject_title || ''}
+            </span>`;
         }
 
         const modalContent = `

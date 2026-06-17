@@ -345,11 +345,17 @@ class Reclamation(Base):
 
     def to_dict(self):
         subject_title = None
+        attempt_score = None
+        attempt_feedback = None
+        exam_title = None
         if self.paper and self.paper.subject:
             subject_title = self.paper.subject.title
         elif self.attempt:
             exam = self.attempt.exam if hasattr(self.attempt, 'exam') else None
             subject_title = exam.title if exam else 'Examen en ligne'
+            exam_title = exam.title if exam else None
+            attempt_score = self.attempt.score
+            attempt_feedback = self.attempt.feedback
         return {
             'id': self.id,
             'paper_id': self.paper_id,
@@ -358,6 +364,9 @@ class Reclamation(Base):
             'student_id': self.student_id,
             'student_name': self.student.full_name if self.student else None,
             'subject_title': subject_title,
+            'exam_title': exam_title,
+            'attempt_score': attempt_score,
+            'attempt_feedback': attempt_feedback,
             'reason': self.reason,
             'status': self.status.value,
             'response': self.response,
