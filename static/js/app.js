@@ -5603,10 +5603,10 @@ ${feedbackHtml}
                 </div>
             ` : ''}
 
-            <form id="respond-reclamation-form">
+            <form id="respond-reclamation-form" novalidate>
                 <div class="form-group">
                     <label><i class="fas fa-tasks"></i> Décision *</label>
-                    <select id="reclamation-status" required>
+                    <select id="reclamation-status" name="status">
                         <option value="">-- Choisir --</option>
                         <option value="resolved">✅ Accepter la réclamation</option>
                         <option value="rejected">❌ Rejeter la réclamation</option>
@@ -5615,13 +5615,13 @@ ${feedbackHtml}
 
                 <div class="form-group" id="new-score-group" style="display: none;">
                     <label><i class="fas fa-star"></i> Nouvelle Note (sur 20)</label>
-                    <input type="number" id="reclamation-new-score" min="0" max="20" step="0.5" value="${currentScore}">
+                    <input type="number" id="reclamation-new-score" name="new_score" min="0" max="20" step="0.5" value="${currentScore}">
                     <small class="form-help">Note actuelle: ${currentScore}/20</small>
                 </div>
 
                 <div class="form-group">
                     <label><i class="fas fa-comment"></i> Réponse au professeur/étudiant *</label>
-                    <textarea id="reclamation-response" rows="5" required placeholder="Expliquez votre décision..."></textarea>
+                    <textarea id="reclamation-response" name="response" rows="5" placeholder="Expliquez votre décision..."></textarea>
                 </div>
 
                 <div class="d-flex gap-2 mt-2">
@@ -5651,11 +5651,17 @@ ${feedbackHtml}
         // Gestionnaire de soumission
         document.getElementById('respond-reclamation-form').addEventListener('submit', async (e) => {
             e.preventDefault();
+
+            // Validation manuelle (novalidate sur le form)
+            const status = document.getElementById('reclamation-status').value;
+            const responseText = document.getElementById('reclamation-response').value.trim();
+            if (!status) { showAlert('Veuillez choisir une décision (Accepter ou Rejeter).', 'error'); return; }
+            if (!responseText) { showAlert('Veuillez rédiger une réponse à l\'étudiant.', 'error'); return; }
+
             showLoader(true);
 
             try {
-                const status = document.getElementById('reclamation-status').value;
-                const response = document.getElementById('reclamation-response').value;
+                const response = responseText;
                 const newScore = status === 'resolved' ? parseFloat(document.getElementById('reclamation-new-score').value) : null;
 
                 const requestData = {
