@@ -3325,11 +3325,21 @@ def professor_dashboard():
             return jsonify({'error': 'Accès réservé aux professeurs'}), 403
 
         my_subjects = session.query(Subject).filter_by(creator_id=user_id).count()
+
+        # Copies papier corrigées
         papers_corrected = session.query(StudentPaper).filter_by(corrected_by_id=user_id).count()
+
+        # Examens en ligne corrigés (attempts avec score, créés par ce prof)
+        online_corrected = session.query(ExamAttempt).join(
+            OnlineExam, ExamAttempt.exam_id == OnlineExam.id
+        ).filter(
+            OnlineExam.created_by_id == user_id,
+            ExamAttempt.score.isnot(None)
+        ).count()
 
         dashboard_data = {
             'my_subjects': my_subjects,
-            'papers_corrected': papers_corrected
+            'papers_corrected': papers_corrected + online_corrected
         }
 
         session.close()
