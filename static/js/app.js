@@ -6916,6 +6916,281 @@ function stripBaremeFromContent(content) {
     return content;
 }
 
+// ============================================================================
+// PARSING & RENDU INTERACTIF DU SUJET D'EXAMEN (QCM + Questions Ouvertes)
+// ============================================================================
+
+function _esc(s) {
+    return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function _parseExamBlocks(raw) {
+    // Retourne un tableau de blocs : {type:'text'|'qcm'|'open', num, text, extraLines, choices}
+    const QNUM  = /^(\d{1,2})\s*[.)\-:]\s*(.*)/;     // 1.  1)  1-  1:  ...
+    const CHOIX = /^([A-Fa-f])\s*[.)\-:]\s*(.*)/;    // A)  A.  a)  a-  ...
+
+    const lines = raw.split('\n');
+    const blocks = [];
+    let i = 0;
+    const preamble = [];
+
+    // Preamble : tout ce qui précède la première question numérotée
+    while (i < lines.length && !lines[i].trim().match(QNUM)) {
+        preamble.push(lines[i]);
+        i++;
+    }
+    if (preamble.join('').trim()) {
+        blocks.push({ type: 'text', content: preamble.join('\n') });
+    }
+
+    // Questions
+    while (i < lines.length) {
+        const line = lines[i].trim();
+        const qm = line.match(QNUM);
+        if (!qm) { i++; continue; }
+
+        const num   = qm[1];
+        const qText = qm[2];
+        i++;
+
+        const extraLines = [];
+        const choices    = [];
+
+        while (i < lines.length) {
+            const nl = lines[i].trim();
+            if (!nl) {
+                i++;
+                // Ligne vide après des choix = fin du bloc QCM
+                if (choices.length >= 2) break;
+                continue;
+            }
+            // Prochaine question numérotée → fin du bloc courant
+            if (nl.match(QNUM) && !nl.match(CHOIX)) break;
+            const cm = nl.match(CHOIX);
+            if (cm) {
+                choices.push({ letter: cm[1].toUpperCase(), text: cm[2] });
+                i++;
+            } else if (choices.length === 0) {
+                // Texte supplémentaire avant les choix
+                extraLines.push(nl);
+                i++;
+            } else {
+                // Texte après les choix → fin du bloc
+                break;
+            }
+        }
+
+        const type = choices.length >= 2 ? 'qcm' : 'open';
+        blocks.push({ type, num, text: qText, extraLines, choices });
+    }
+
+    return blocks;
+}
+
+function _renderExamAnswerSection(blocks, savedData) {
+    const qcmData   = (savedData && savedData.qcm)   || {};
+    const texteData = (savedData && savedData.texte)  || {};
+    const fallbackTxt = savedData
+        ? (savedData.content || savedData.reponse || savedData.answer || savedData.text || '')
+        : '';
+
+    const questions = blocks.filter(b => b.type === 'qcm' || b.type === 'open');
+    const hasQCM    = questions.some(b => b.type === 'qcm');
+    const hasOpen   = questions.some(b => b.type === 'open');
+
+    // Aucune question structurée détectée → textarea classique
+    if (questions.length === 0) {
+        return `
+            <label style="font-weight:600;color:#374151;margin-bottom:6px;display:block;">
+                <i class="fas fa-edit"></i> Vos Réponses *
+            </label>
+            <textarea id="exam-fallback-textarea" rows="20"
+                placeholder="Rédigez vos réponses ici en indiquant clairement le numéro de chaque question..."
+                oninput="_syncExamAnswers()"
+                style="font-family:monospace;font-size:14px;width:100%;box-sizing:border-box;">${_esc(fallbackTxt)}</textarea>`;
+    }
+
+    // Légende
+    let legend = '';
+    if (hasQCM && hasOpen) {
+        legend = `<div style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap;">
+            <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#1e40af;background:#eff6ff;padding:4px 11px;border-radius:99px;">
+                <i class="fas fa-check-square"></i> QCM — cochez la bonne réponse
+            </span>
+            <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#065f46;background:#ecfdf5;padding:4px 11px;border-radius:99px;">
+                <i class="fas fa-pen"></i> Ouvert — rédigez votre réponse
+            </span>
+        </div>`;
+    } else if (hasQCM) {
+        legend = `<div style="margin-bottom:14px;font-size:13px;color:#1e40af;font-weight:600;">
+            <i class="fas fa-info-circle"></i> Cliquez sur la bonne réponse pour chaque question.
+        </div>`;
+    }
+
+    // Barre de progression
+    const total = questions.length;
+    const progress = `
+        <div id="exam-progress-bar-wrapper" style="margin-bottom:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <span style="font-size:12px;color:#64748b;font-weight:600;"><i class="fas fa-tasks"></i> Progression</span>
+                <span id="exam-progress-label" style="font-size:12px;color:#3b82f6;font-weight:700;">0 / ${total} répondu(es)</span>
+            </div>
+            <div style="height:6px;background:#e2e8f0;border-radius:99px;overflow:hidden;">
+                <div id="exam-progress-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#10b981);border-radius:99px;transition:width .3s;"></div>
+            </div>
+        </div>`;
+
+    // Rendu des blocs
+    let qHtml = '';
+    blocks.forEach(block => {
+        if (block.type === 'text') {
+            const txt = _esc(block.content);
+            qHtml += `<div style="padding:10px 14px;background:#f8fafc;border-left:3px solid #94a3b8;border-radius:4px;margin-bottom:14px;font-size:13px;color:#475569;white-space:pre-wrap;font-family:monospace;">${txt}</div>`;
+            return;
+        }
+
+        const isQCM    = block.type === 'qcm';
+        const savedVal = isQCM ? (qcmData[block.num] || '') : (texteData[block.num] || '');
+        const answered = isQCM ? !!savedVal : !!(savedVal && savedVal.trim());
+        const border   = answered ? (isQCM ? '#3b82f6' : '#10b981') : '#e2e8f0';
+
+        const badge = isQCM
+            ? `<span style="background:#eff6ff;color:#3b82f6;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:700;margin-left:8px;vertical-align:middle;">QCM</span>`
+            : `<span style="background:#ecfdf5;color:#065f46;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:700;margin-left:8px;vertical-align:middle;">Ouvert</span>`;
+
+        qHtml += `<div class="exam-q-block" id="qblock-${block.num}" data-qnum="${block.num}" data-type="${block.type}"
+            style="border:1.5px solid ${border};border-radius:12px;padding:16px 18px;margin-bottom:12px;background:#fff;transition:border-color .2s;">
+            <div style="font-weight:700;font-size:14px;color:#0f172a;margin-bottom:8px;">
+                Question ${block.num} ${badge}
+            </div>
+            <div style="font-size:14px;color:#1e293b;margin-bottom:${block.extraLines && block.extraLines.length ? '4px' : '12px'};line-height:1.6;">${_esc(block.text)}</div>
+            ${block.extraLines && block.extraLines.length
+                ? `<div style="font-size:14px;color:#1e293b;margin-bottom:12px;line-height:1.6;">${block.extraLines.map(_esc).join('<br>')}</div>`
+                : ''}`;
+
+        if (isQCM) {
+            qHtml += `<div class="qcm-choices-group" id="choices-${block.num}">`;
+            block.choices.forEach(c => {
+                const sel    = savedVal === c.letter;
+                const bdr    = sel ? '#3b82f6' : '#e2e8f0';
+                const bg     = sel ? '#eff6ff' : '#f8fafc';
+                qHtml += `
+                <label class="qcm-choice-label" id="choice-lbl-${block.num}-${c.letter}"
+                    style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:8px;border:1.5px solid ${bdr};background:${bg};cursor:pointer;margin-bottom:6px;transition:all .15s;user-select:none;"
+                    onclick="_onQCMSelect('${block.num}','${c.letter}')">
+                    <input type="radio" name="qcm_q${block.num}" value="${c.letter}" ${sel ? 'checked' : ''}
+                        style="width:16px;height:16px;accent-color:#3b82f6;flex-shrink:0;pointer-events:none;">
+                    <span style="width:26px;height:26px;border-radius:6px;background:#e0e7ff;color:#3730a3;font-weight:700;font-size:13px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">${c.letter}</span>
+                    <span style="font-size:14px;color:#1e293b;">${_esc(c.text)}</span>
+                </label>`;
+            });
+            qHtml += `</div>`;
+        } else {
+            qHtml += `
+            <textarea class="open-q-textarea" id="open-q-${block.num}" data-qnum="${block.num}"
+                rows="4" placeholder="Votre réponse à la question ${block.num}..."
+                oninput="_onOpenInput(this)"
+                style="font-size:14px;font-family:inherit;resize:vertical;border-radius:8px;border:1.5px solid #e2e8f0;padding:10px 12px;width:100%;box-sizing:border-box;transition:border-color .2s;">${_esc(savedVal)}</textarea>`;
+        }
+
+        qHtml += `</div>`;
+    });
+
+    return legend + progress + qHtml;
+}
+
+// Sélection d'une option QCM
+function _onQCMSelect(qNum, letter) {
+    const radio = document.querySelector(`input[name="qcm_q${qNum}"][value="${letter}"]`);
+    if (radio) radio.checked = true;
+    document.querySelectorAll(`#choices-${qNum} .qcm-choice-label`).forEach(lbl => {
+        const sel = lbl.id === `choice-lbl-${qNum}-${letter}`;
+        lbl.style.borderColor = sel ? '#3b82f6' : '#e2e8f0';
+        lbl.style.background  = sel ? '#eff6ff' : '#f8fafc';
+    });
+    const qBlock = document.getElementById(`qblock-${qNum}`);
+    if (qBlock) qBlock.style.borderColor = '#3b82f6';
+    _updateExamProgress();
+    _syncExamAnswers();
+}
+
+// Saisie dans un textarea ouvert
+function _onOpenInput(textarea) {
+    const qNum = textarea.dataset.qnum;
+    const qBlock = document.getElementById(`qblock-${qNum}`);
+    if (qBlock) qBlock.style.borderColor = textarea.value.trim() ? '#10b981' : '#e2e8f0';
+    _updateExamProgress();
+    _syncExamAnswers();
+}
+
+function _updateExamProgress() {
+    const qblocks = document.querySelectorAll('.exam-q-block');
+    const total   = qblocks.length;
+    if (!total) return;
+    let answered = 0;
+    qblocks.forEach(block => {
+        const qNum = block.dataset.qnum;
+        const type = block.dataset.type;
+        if (type === 'qcm') {
+            if (document.querySelector(`input[name="qcm_q${qNum}"]:checked`)) answered++;
+        } else {
+            const ta = document.getElementById(`open-q-${qNum}`);
+            if (ta && ta.value.trim()) answered++;
+        }
+    });
+    const pct   = Math.round(answered / total * 100);
+    const fill  = document.getElementById('exam-progress-fill');
+    const label = document.getElementById('exam-progress-label');
+    if (fill)  fill.style.width = pct + '%';
+    if (label) label.textContent = `${answered} / ${total} répondu(es)`;
+}
+
+function collectExamAnswers() {
+    // Retourne { content, qcm, texte } ou { content } si fallback textarea
+    const fallback = document.getElementById('exam-fallback-textarea');
+    if (fallback) return { content: fallback.value };
+
+    const qblocks = document.querySelectorAll('.exam-q-block');
+    if (!qblocks.length) {
+        const hidden = document.getElementById('exam-answers');
+        return { content: hidden ? hidden.value : '' };
+    }
+
+    const qcm   = {};
+    const texte = {};
+    const lines = [];
+
+    qblocks.forEach(block => {
+        const qNum = block.dataset.qnum;
+        const type = block.dataset.type;
+        if (type === 'qcm') {
+            const checked = block.querySelector(`input[name="qcm_q${qNum}"]:checked`);
+            if (checked) {
+                qcm[qNum] = checked.value;
+                lines.push(`Q${qNum}: ${checked.value}`);
+            } else {
+                lines.push(`Q${qNum}: (sans réponse)`);
+            }
+        } else {
+            const ta  = document.getElementById(`open-q-${qNum}`);
+            const val = ta ? ta.value.trim() : '';
+            if (val) texte[qNum] = val;
+            lines.push(`Q${qNum}: ${val || '(sans réponse)'}`);
+        }
+    });
+
+    return { content: lines.join('\n'), qcm, texte };
+}
+
+function _syncExamAnswers() {
+    // Maintient le champ caché à jour pour compatibilité
+    const hidden = document.getElementById('exam-answers');
+    if (hidden) {
+        const data = collectExamAnswers();
+        hidden.value = JSON.stringify(data);
+    }
+}
+
 async function startOnlineExam(examId) {
     // Afficher la modal de consentement caméra/micro avant de démarrer
     showProctoringConsentModal(examId);
@@ -7327,10 +7602,18 @@ async function showExamCompositionInterface(examId, attempt) {
                     <input type="text" value="${currentUser.full_name}" disabled style="background: #f1f5f9;">
                 </div>
 
-                <div class="form-group">
-                    <label><i class="fas fa-edit"></i> Vos Réponses *</label>
-                    <textarea id="exam-answers" rows="20" placeholder="Rédigez vos réponses ici en indiquant clairement le numéro de chaque question..." style="font-family: monospace; font-size: 14px;">${(() => { try { const d = JSON.parse(attempt.answers || '{}'); return d.content || d.reponse || d.answer || d.text || ''; } catch(e) { return attempt.answers || ''; } })()}</textarea>
-                    <small class="form-help">
+                <input type="hidden" id="exam-answers">
+
+                <div class="form-group" id="exam-answers-section">
+                    ${(() => {
+                        const raw = exam.subject_content && exam.subject_content.content
+                            ? stripBaremeFromContent(exam.subject_content.content) : '';
+                        const blocks = raw ? _parseExamBlocks(raw) : [];
+                        let savedData = null;
+                        try { savedData = JSON.parse(attempt.answers || '{}'); } catch(e) {}
+                        return _renderExamAnswerSection(blocks, savedData);
+                    })()}
+                    <small class="form-help" style="margin-top:14px;display:block;">
                         <i class="fas fa-save"></i> Sauvegarde automatique toutes les 30 secondes
                     </small>
                 </div>
@@ -7348,6 +7631,10 @@ async function showExamCompositionInterface(examId, attempt) {
     `;
     
     document.getElementById('main-content').innerHTML = html;
+
+    // Initialiser barre de progression et champ caché
+    _updateExamProgress();
+    _syncExamAnswers();
 
     // Ajouter la prévisualisation caméra flottante
     const camBox = document.createElement('div');
@@ -7385,18 +7672,21 @@ function initExamSurveillance(exam, attempt) {
         });
     }
     
-    // Désactiver copier/coller
+    // Désactiver copier/coller sur toute la zone de réponse
     if (!exam.enable_copy_paste) {
-        const textarea = document.getElementById('exam-answers');
-        textarea.addEventListener('copy', function(e) {
-            e.preventDefault();
-            logExamActivity(attempt.id, 'copy_attempt');
-            showAlert('Le copier est désactivé', 'warning');
+        document.addEventListener('copy', function(e) {
+            if (e.target.closest && e.target.closest('#exam-answers-section')) {
+                e.preventDefault();
+                logExamActivity(attempt.id, 'copy_attempt');
+                showAlert('Le copier est désactivé', 'warning');
+            }
         });
-        textarea.addEventListener('paste', function(e) {
-            e.preventDefault();
-            logExamActivity(attempt.id, 'paste_attempt');
-            showAlert('Le coller est désactivé', 'warning');
+        document.addEventListener('paste', function(e) {
+            if (e.target.closest && e.target.closest('#exam-answers-section')) {
+                e.preventDefault();
+                logExamActivity(attempt.id, 'paste_attempt');
+                showAlert('Le coller est désactivé', 'warning');
+            }
         });
     }
     
@@ -7524,12 +7814,12 @@ function startExamTimer(endTime, attemptId) {
 
 async function saveExamAnswers(attemptId, showMessage = false) {
     try {
-        const answers = document.getElementById('exam-answers').value;
-        
+        const answersData = collectExamAnswers();
+
         const response = await authenticatedFetch(`/api/exam_attempts/${attemptId}/save`, {
             method: 'POST',
             body: JSON.stringify({
-                answers: JSON.stringify({ content: answers })
+                answers: JSON.stringify(answersData)
             })
         });
         
@@ -7646,11 +7936,11 @@ async function _confirmSignatureAndSubmit() {
 
     showLoader(true);
     try {
-        const answers = document.getElementById('exam-answers')?.value || '';
+        const answersData = collectExamAnswers();
         const response = await authenticatedFetch(`/api/exam_attempts/${currentExamAttempt.id}/submit`, {
             method: 'POST',
             body: JSON.stringify({
-                answers: JSON.stringify({ content: answers }),
+                answers: JSON.stringify(answersData),
                 signature_data: signatureData
             })
         });
@@ -7678,10 +7968,10 @@ async function autoSubmitExam(attemptId) {
     _stopFaceDetection();
     showLoader(true);
     try {
-        const answers = document.getElementById('exam-answers')?.value || '';
+        const answersData = collectExamAnswers();
         await authenticatedFetch(`/api/exam_attempts/${attemptId}/submit`, {
             method: 'POST',
-            body: JSON.stringify({ answers: JSON.stringify({ content: answers }) })
+            body: JSON.stringify({ answers: JSON.stringify(answersData) })
         });
         showAlert('Temps écoulé — votre examen a été soumis automatiquement.', 'info');
         setTimeout(() => { loadOnlineExams(); }, 3000);
