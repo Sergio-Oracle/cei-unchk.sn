@@ -4413,36 +4413,50 @@ def generate_transcript(student_id, semester_id):
                 if not ec.is_active:
                     continue
 
-                # Notes copies papier pour cet EC
-                paper_scores = [
-                    s[0] for s in session.query(StudentPaper.score)
-                    .join(Subject, StudentPaper.subject_id == Subject.id)
+                # Toutes les évaluations de cet EC pour cet étudiant, triées par date décroissante
+                # Règle : on prend la note de la dernière évaluation corrigée.
+                # Si plusieurs évaluations distinctes existent (contrôle continu + examen final),
+                # elles proviennent de Subjects différents → chacune a sa propre date → on prend la plus récente.
+                # Cela couvre aussi le cas rattrapage : la nouvelle note remplace l'ancienne.
+                papers_dated = session.query(StudentPaper.score, StudentPaper.corrected_at) \
+                    .join(Subject, StudentPaper.subject_id == Subject.id) \
                     .filter(
                         StudentPaper.student_id == student_id,
                         Subject.ec_id == ec.id,
                         StudentPaper.score.isnot(None)
-                    ).all()
-                ]
+                    ).order_by(StudentPaper.corrected_at.desc()).all()
 
-                # Notes examens en ligne pour cet EC
-                attempt_scores = [
-                    s[0] for s in session.query(ExamAttempt.score)
-                    .join(OnlineExam, ExamAttempt.exam_id == OnlineExam.id)
-                    .join(Subject, OnlineExam.subject_id == Subject.id)
+                attempts_dated = session.query(ExamAttempt.score,
+                    ExamAttempt.corrected_at, ExamAttempt.submitted_at) \
+                    .join(OnlineExam, ExamAttempt.exam_id == OnlineExam.id) \
+                    .join(Subject, OnlineExam.subject_id == Subject.id) \
                     .filter(
                         ExamAttempt.student_id == student_id,
                         Subject.ec_id == ec.id,
                         ExamAttempt.score.isnot(None)
+                    ).order_by(
+                        ExamAttempt.corrected_at.desc(),
+                        ExamAttempt.submitted_at.desc()
                     ).all()
-                ]
 
-                all_scores = paper_scores + attempt_scores
-                if all_scores:
-                    ec_avg = sum(all_scores) / len(all_scores)
-                    ue_weighted_sum += ec_avg * ec.coefficient
+                # Construire une liste unifiée (score, timestamp) puis prendre la plus récente
+                from datetime import datetime as _dt
+                _epoch = _dt(2000, 1, 1)
+                unified = []
+                for row in papers_dated:
+                    unified.append((row[0], row[1] or _epoch))
+                for row in attempts_dated:
+                    ts = row[1] or row[2] or _epoch  # corrected_at sinon submitted_at
+                    unified.append((row[0], ts))
+
+                if unified:
+                    # Trier par timestamp décroissant et prendre la note la plus récente
+                    unified.sort(key=lambda x: x[1], reverse=True)
+                    ec_note = unified[0][0]
+                    ue_weighted_sum += ec_note * ec.coefficient
                     ue_total_coef += ec.coefficient
                     total_notes_found += 1
-                    ec_avg_rounded = round(ec_avg, 2)
+                    ec_avg_rounded = round(ec_note, 2)
                 else:
                     ec_avg_rounded = None
 
