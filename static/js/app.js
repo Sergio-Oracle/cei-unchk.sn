@@ -3540,37 +3540,98 @@ async function loadMyTranscripts() {
         const gpaColor = gpa => gpa >= 16 ? '#7c3aed' : gpa >= 14 ? '#2563eb' : gpa >= 10 ? '#10b981' : '#ef4444';
         const mention  = gpa => gpa >= 16 ? 'Très bien' : gpa >= 14 ? 'Bien' : gpa >= 12 ? 'Assez bien' : gpa >= 10 ? 'Passable' : 'Ajourné';
 
-        const rows = transcripts.map(t => {
-            const color = gpaColor(t.gpa);
-            const cred  = t.obtained_credits !== null ? `${t.obtained_credits}/${t.total_credits}` : '—';
+        // Rendu d'un bloc UE pour le détail inline
+        const renderUEDetail = (ue) => {
+            const moy = ue.moyenne != null ? Number(ue.moyenne).toFixed(2) : '—';
+            let badgeBg, badgeColor, badgeLabel;
+            if (ue.validated && ue.validated_by_compensation) {
+                badgeBg = '#fffbeb'; badgeColor = '#d97706';
+                badgeLabel = `Compensé — ${ue.credits_acquis} crédit(s)`;
+            } else if (ue.validated) {
+                badgeBg = '#ecfdf5'; badgeColor = '#059669';
+                badgeLabel = `Validé — ${ue.credits_acquis} crédit(s)`;
+            } else if (ue.validated === false) {
+                badgeBg = '#fef2f2'; badgeColor = '#dc2626';
+                badgeLabel = `Non validé — 0/${ue.credits} crédit(s)`;
+            } else {
+                badgeBg = '#f8fafc'; badgeColor = '#64748b'; badgeLabel = 'Incomplet';
+            }
+            const ecRows = (ue.ecs || []).map(ec => {
+                const note = ec.note != null ? Number(ec.note).toFixed(2) : '—';
+                const noteColor = ec.note == null ? '#94a3b8' : ec.note >= 10 ? '#059669' : '#dc2626';
+                return `<tr>
+                    <td style="padding:5px 10px;font-size:12px;color:#475569;font-family:monospace;">${ec.ec_code}</td>
+                    <td style="padding:5px 10px;font-size:12px;color:#0f172a;">${ec.ec_name}</td>
+                    <td style="padding:5px 10px;font-size:12px;color:#64748b;text-align:center;">${ec.coefficient}</td>
+                    <td style="padding:5px 10px;font-size:13px;font-weight:700;color:${noteColor};text-align:center;">${note}</td>
+                </tr>`;
+            }).join('');
             return `
-            <div style="background:white;border:1px solid #e2e8f0;border-radius:12px;padding:20px 22px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:12px;">
-                <div style="display:flex;align-items:center;gap:16px;flex:1;min-width:220px;">
-                    <div style="width:52px;height:52px;border-radius:12px;background:${color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                        <i class="fas fa-graduation-cap" style="color:${color};font-size:20px;"></i>
-                    </div>
-                    <div>
-                        <div style="font-weight:700;color:#0f172a;font-size:15px;">${t.formation_name}</div>
-                        <div style="font-size:13px;color:#64748b;margin-top:2px;">Semestre ${t.semester_number || ''} — ${t.semester_name}</div>
-                        <div style="font-size:11px;color:#94a3b8;margin-top:3px;">Généré le ${fmtDate(t.generated_at)}</div>
+            <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:8px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:#1e3a8a;">
+                    <span style="color:white;font-size:12px;font-weight:700;">${ue.ue_code} — ${ue.ue_name}</span>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <span style="color:#93c5fd;font-size:12px;font-weight:700;">Moy. : ${moy}/20</span>
+                        <span style="background:${badgeBg};color:${badgeColor};font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;">${badgeLabel}</span>
                     </div>
                 </div>
-                <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
-                    <div style="text-align:center;">
-                        <div style="font-size:28px;font-weight:800;color:${color};line-height:1;">${t.gpa ? Number(t.gpa).toFixed(2) : '—'}</div>
-                        <div style="font-size:10px;color:#94a3b8;">/20 — Moy. générale</div>
+                ${ecRows ? `<table style="width:100%;border-collapse:collapse;">
+                    <thead><tr style="background:#f1f5f9;">
+                        <th style="padding:5px 10px;font-size:10px;color:#64748b;text-align:left;font-weight:600;">Code</th>
+                        <th style="padding:5px 10px;font-size:10px;color:#64748b;text-align:left;font-weight:600;">Intitulé EC</th>
+                        <th style="padding:5px 10px;font-size:10px;color:#64748b;text-align:center;font-weight:600;">Coef.</th>
+                        <th style="padding:5px 10px;font-size:10px;color:#64748b;text-align:center;font-weight:600;">Note /20</th>
+                    </tr></thead>
+                    <tbody>${ecRows}</tbody>
+                </table>` : '<div style="padding:8px 14px;font-size:12px;color:#94a3b8;">Aucune note</div>'}
+            </div>`;
+        };
+
+        const rows = transcripts.map((t, idx) => {
+            const color = gpaColor(t.gpa);
+            const cred  = t.obtained_credits !== null ? `${t.obtained_credits}/${t.total_credits}` : '—';
+            const ueBlock = (t.ue_details && t.ue_details.length)
+                ? t.ue_details.map(renderUEDetail).join('')
+                : '<div style="color:#94a3b8;font-size:12px;padding:8px 0;">Aucun détail UE disponible — regénérez le relevé.</div>';
+            return `
+            <div style="background:white;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;margin-bottom:14px;">
+                <!-- Résumé -->
+                <div style="padding:18px 22px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;">
+                    <div style="display:flex;align-items:center;gap:16px;flex:1;min-width:220px;">
+                        <div style="width:48px;height:48px;border-radius:12px;background:${color}18;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                            <i class="fas fa-graduation-cap" style="color:${color};font-size:18px;"></i>
+                        </div>
+                        <div>
+                            <div style="font-weight:700;color:#0f172a;font-size:15px;">${t.formation_name}</div>
+                            <div style="font-size:12px;color:#64748b;margin-top:2px;">Semestre ${t.semester_number || ''} — ${t.semester_name}</div>
+                            <div style="font-size:11px;color:#94a3b8;margin-top:2px;">Généré le ${fmtDate(t.generated_at)}</div>
+                        </div>
                     </div>
-                    <div style="text-align:center;">
-                        <div style="font-size:16px;font-weight:700;color:${color};">${cred}</div>
-                        <div style="font-size:10px;color:#94a3b8;">Crédits</div>
+                    <div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;">
+                        <div style="text-align:center;">
+                            <div style="font-size:26px;font-weight:800;color:${color};line-height:1;">${t.gpa ? Number(t.gpa).toFixed(2) : '—'}</div>
+                            <div style="font-size:10px;color:#94a3b8;">/20 — Moy. semestrielle</div>
+                        </div>
+                        <div style="text-align:center;">
+                            <div style="font-size:15px;font-weight:700;color:${color};">${cred}</div>
+                            <div style="font-size:10px;color:#94a3b8;">Crédits</div>
+                        </div>
+                        <span style="background:${color}18;color:${color};font-size:11px;font-weight:700;padding:5px 12px;border-radius:99px;">${mention(t.gpa)}</span>
+                        <div style="display:flex;gap:8px;">
+                            <button onclick="toggleUEDetail(${idx})"
+                                style="background:#f1f5f9;color:#334155;border:1px solid #e2e8f0;border-radius:8px;padding:7px 13px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px;">
+                                <i class="fas fa-list-ul"></i> Détail UE
+                            </button>
+                            <button onclick="downloadTranscriptPDF(${t.id}, '${(t.formation_name||'').replace(/'/g,"\\'")} S${t.semester_number||''}')"
+                                style="background:#3b82f6;color:white;border:none;border-radius:8px;padding:7px 13px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px;white-space:nowrap;">
+                                <i class="fas fa-file-pdf"></i> PDF
+                            </button>
+                        </div>
                     </div>
-                    <div style="text-align:center;">
-                        <span style="background:${color}18;color:${color};font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;">${mention(t.gpa)}</span>
-                    </div>
-                    <button onclick="downloadTranscriptPDF(${t.id}, '${(t.formation_name||'').replace(/'/g,"\\'")} S${t.semester_number||''}')"
-                        style="background:#3b82f6;color:white;border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap;">
-                        <i class="fas fa-file-pdf"></i> Télécharger PDF
-                    </button>
+                </div>
+                <!-- Détail UE (masqué par défaut) -->
+                <div id="ue-detail-${idx}" style="display:none;border-top:1px solid #e2e8f0;padding:14px 18px;background:#f8fafc;">
+                    ${ueBlock}
                 </div>
             </div>`;
         }).join('');
@@ -3624,6 +3685,12 @@ async function downloadTranscriptPDF(transcriptId, label) {
         URL.revokeObjectURL(url);
     } catch(e) { showAlert('Erreur lors du téléchargement.', 'error'); }
     finally { showLoader(false); }
+}
+
+function toggleUEDetail(idx) {
+    const el = document.getElementById(`ue-detail-${idx}`);
+    if (!el) return;
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
 function confirmDeleteTranscript(transcriptId, studentName, semesterName) {

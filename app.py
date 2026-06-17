@@ -4371,74 +4371,133 @@ def submit_exam_attempt(attempt_id):
 @app.route('/api/transcripts/generate/<int:student_id>/<int:semester_id>', methods=['POST'])
 @jwt_required()
 def generate_transcript(student_id, semester_id):
-    """Générer un relevé de notes (admin/professeur)"""
+    """Générer un relevé de notes selon la logique LMD — validation par UE avec compensation semestrielle"""
     try:
         user_id = int(get_jwt_identity())
         session = get_session()
-        
+
         user = session.query(User).filter_by(id=user_id).first()
         if user.role not in [UserRole.ADMIN, UserRole.PROFESSOR]:
             session.close()
             return jsonify({'error': 'Accès non autorisé'}), 403
-        
-        # Récupérer l'étudiant
+
         student = session.query(User).filter_by(id=student_id, role=UserRole.STUDENT).first()
         if not student:
             session.close()
             return jsonify({'error': 'Étudiant non trouvé'}), 404
-        
-        # Récupérer le semestre
+
         semester = session.query(Semester).filter_by(id=semester_id).first()
         if not semester:
             session.close()
             return jsonify({'error': 'Semestre non trouvé'}), 404
-        
-        # Calculer les notes
-        # 1. Copies papier corrigées
-        papers = session.query(StudentPaper).join(Subject).join(EC).join(UE).filter(
-            StudentPaper.student_id == student_id,
-            UE.semester_id == semester_id,
-            StudentPaper.score != None
-        ).all()
 
-        online_attempts = session.query(ExamAttempt).join(
-            OnlineExam, ExamAttempt.exam_id == OnlineExam.id
-        ).join(
-            Subject, OnlineExam.subject_id == Subject.id
-        ).join(EC).join(UE).filter(
-            ExamAttempt.student_id == student_id,
-            UE.semester_id == semester_id,
-            ExamAttempt.score != None
-        ).all()
+        # ── Récupérer toutes les UE du semestre avec leurs EC ──
+        ues = session.query(UE).options(
+            joinedload(UE.ecs)
+        ).filter_by(semester_id=semester_id, is_active=True).order_by(UE.code).all()
 
-        if not papers and not online_attempts:
+        if not ues:
+            session.close()
+            return jsonify({'error': 'Aucune UE configurée pour ce semestre'}), 400
+
+        # ── Pour chaque UE → chaque EC → agréger les notes ──
+        ue_results = []
+        total_notes_found = 0
+
+        for ue in ues:
+            ec_results = []
+            ue_weighted_sum = 0.0
+            ue_total_coef = 0
+
+            for ec in sorted(ue.ecs, key=lambda e: e.code):
+                if not ec.is_active:
+                    continue
+
+                # Notes copies papier pour cet EC
+                paper_scores = [
+                    s[0] for s in session.query(StudentPaper.score)
+                    .join(Subject, StudentPaper.subject_id == Subject.id)
+                    .filter(
+                        StudentPaper.student_id == student_id,
+                        Subject.ec_id == ec.id,
+                        StudentPaper.score.isnot(None)
+                    ).all()
+                ]
+
+                # Notes examens en ligne pour cet EC
+                attempt_scores = [
+                    s[0] for s in session.query(ExamAttempt.score)
+                    .join(OnlineExam, ExamAttempt.exam_id == OnlineExam.id)
+                    .join(Subject, OnlineExam.subject_id == Subject.id)
+                    .filter(
+                        ExamAttempt.student_id == student_id,
+                        Subject.ec_id == ec.id,
+                        ExamAttempt.score.isnot(None)
+                    ).all()
+                ]
+
+                all_scores = paper_scores + attempt_scores
+                if all_scores:
+                    ec_avg = sum(all_scores) / len(all_scores)
+                    ue_weighted_sum += ec_avg * ec.coefficient
+                    ue_total_coef += ec.coefficient
+                    total_notes_found += 1
+                    ec_avg_rounded = round(ec_avg, 2)
+                else:
+                    ec_avg_rounded = None
+
+                ec_results.append({
+                    'ec_id': ec.id,
+                    'ec_code': ec.code,
+                    'ec_name': ec.name,
+                    'coefficient': ec.coefficient,
+                    'note': ec_avg_rounded,
+                })
+
+            # Moyenne UE pondérée par coefficients EC
+            ue_avg = (ue_weighted_sum / ue_total_coef) if ue_total_coef > 0 else None
+            ue_validated = (ue_avg >= 10) if ue_avg is not None else None
+
+            ue_results.append({
+                'ue_id': ue.id,
+                'ue_code': ue.code,
+                'ue_name': ue.name,
+                'credits': ue.credits,
+                'ecs': ec_results,
+                'moyenne': round(ue_avg, 2) if ue_avg is not None else None,
+                'validated': ue_validated,
+                'validated_by_compensation': False,
+                'credits_acquis': ue.credits if ue_validated else 0,
+            })
+
+        if total_notes_found == 0:
             session.close()
             return jsonify({'success': False, 'error': 'Aucune note disponible pour ce semestre'}), 200
 
-        # Calculer moyennes
-        total_weighted_score = 0
-        total_coefficient = 0
+        # ── Moyenne semestrielle pondérée par crédits UE (UE avec notes seulement) ──
+        ues_with_grades = [u for u in ue_results if u['moyenne'] is not None]
+        sem_weighted = sum(u['moyenne'] * u['credits'] for u in ues_with_grades)
+        sem_credits = sum(u['credits'] for u in ues_with_grades)
+        semester_avg = round(sem_weighted / sem_credits, 2) if sem_credits > 0 else 0.0
 
-        for paper in papers:
-            ec = paper.subject.ec
-            if ec:
-                total_weighted_score += paper.score * ec.coefficient
-                total_coefficient += ec.coefficient
+        # ── Compensation semestrielle LMD : si moy. générale ≥ 10, toutes les UE notées passent ──
+        if semester_avg >= 10:
+            for u in ue_results:
+                if u['moyenne'] is not None and not u['validated']:
+                    u['validated'] = True
+                    u['validated_by_compensation'] = True
+                    u['credits_acquis'] = u['credits']
 
-        for attempt in online_attempts:
-            ec = attempt.exam.subject.ec if attempt.exam and attempt.exam.subject else None
-            if ec:
-                total_weighted_score += attempt.score * ec.coefficient
-                total_coefficient += ec.coefficient
+        # ── Totaux ──
+        semester_total_credits = sum(u['credits'] for u in ue_results)
+        obtained_credits = sum(u['credits_acquis'] for u in ue_results)
 
-        gpa = (total_weighted_score / total_coefficient) if total_coefficient > 0 else 0
-        
-        # Créer/mettre à jour le relevé
+        # ── Sauvegarder ──
         transcript = session.query(GradeTranscript).filter_by(
             student_id=student_id,
             semester_id=semester_id
         ).first()
-        
+
         if not transcript:
             transcript = GradeTranscript(
                 student_id=student_id,
@@ -4446,19 +4505,22 @@ def generate_transcript(student_id, semester_id):
                 generated_by_id=user_id
             )
             session.add(transcript)
-        
-        transcript.total_credits = semester.total_credits
-        transcript.obtained_credits = semester.total_credits if gpa >= 10 else 0
-        transcript.gpa = round(gpa, 2)
+
+        transcript.gpa = semester_avg
+        transcript.total_credits = semester_total_credits
+        transcript.obtained_credits = obtained_credits
+        transcript.ue_details = json.dumps(ue_results, ensure_ascii=False)
         transcript.generated_at = utcnow()
-        
+        transcript.generated_by_id = user_id
+
         session.commit()
         transcript_dict = transcript.to_dict()
         session.close()
-        
+
         return jsonify({'success': True, 'transcript': transcript_dict})
     except Exception as e:
         print(f"Erreur generate_transcript: {e}")
+        import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/transcripts', methods=['GET'])
@@ -4490,6 +4552,13 @@ def get_all_transcripts():
                 if generator:
                     generator_name = generator.full_name
             
+            ue_data = None
+            if t.ue_details:
+                try:
+                    ue_data = json.loads(t.ue_details)
+                except Exception:
+                    pass
+
             transcripts_list.append({
                 'id': t.id,
                 'student_id': t.student_id,
@@ -4501,7 +4570,8 @@ def get_all_transcripts():
                 'gpa': t.gpa,
                 'total_credits': t.total_credits,
                 'obtained_credits': t.obtained_credits,
-                'validated': t.gpa >= 10,
+                'validated': (t.gpa >= 10) if t.gpa is not None else False,
+                'ue_details': ue_data,
                 'generated_by': generator_name,
                 'generated_by_id': t.generated_by_id,
                 'generated_at': t.generated_at.isoformat() if t.generated_at else None
@@ -4541,6 +4611,13 @@ def get_student_transcripts():
                 if generator:
                     generator_name = generator.full_name
             
+            ue_data = None
+            if t.ue_details:
+                try:
+                    ue_data = json.loads(t.ue_details)
+                except Exception:
+                    pass
+
             transcripts_list.append({
                 'id': t.id,
                 'semester_name': t.semester.name if t.semester else 'N/A',
@@ -4549,8 +4626,9 @@ def get_student_transcripts():
                 'gpa': t.gpa,
                 'total_credits': t.total_credits,
                 'obtained_credits': t.obtained_credits,
-                'validated': t.gpa >= 10,
-                'generated_by': generator_name,  # ✅ CORRIGÉ
+                'validated': (t.gpa >= 10) if t.gpa is not None else False,
+                'ue_details': ue_data,
+                'generated_by': generator_name,
                 'generated_at': t.generated_at.isoformat() if t.generated_at else None
             })
         
@@ -4579,42 +4657,57 @@ def export_transcript_pdf(transcript_id):
             session.close()
             return jsonify({'error': 'Accès non autorisé'}), 403
         
-        # Récupérer les notes détaillées — copies papier
-        papers = session.query(StudentPaper).join(Subject).join(EC).join(UE).filter(
-            StudentPaper.student_id == transcript.student_id,
-            UE.semester_id == transcript.semester_id,
-            StudentPaper.score != None
-        ).all()
-
-        # Récupérer les notes détaillées — examens en ligne
-        online_attempts = session.query(ExamAttempt).join(
-            OnlineExam, ExamAttempt.exam_id == OnlineExam.id
-        ).join(
-            Subject, OnlineExam.subject_id == Subject.id
-        ).join(EC).join(UE).filter(
-            ExamAttempt.student_id == transcript.student_id,
-            UE.semester_id == transcript.semester_id,
-            ExamAttempt.score != None
-        ).all()
-
-        # Générer PDF
+        # Récupérer le détail UE stocké (logique LMD) — ou recalculer si ancien relevé
         from utils import generate_transcript_pdf
 
-        notes_list = [{
-            'ec_code': p.subject.ec.code if p.subject.ec else 'N/A',
-            'ec_name': p.subject.ec.name if p.subject.ec else p.subject.title,
-            'score': p.score,
-            'coefficient': p.subject.ec.coefficient if p.subject.ec else 1
-        } for p in papers]
+        ue_details = None
+        if transcript.ue_details:
+            try:
+                ue_details = json.loads(transcript.ue_details)
+            except Exception:
+                ue_details = None
 
-        for attempt in online_attempts:
-            ec = attempt.exam.subject.ec if attempt.exam and attempt.exam.subject else None
-            notes_list.append({
-                'ec_code': ec.code if ec else 'N/A',
-                'ec_name': ec.name if ec else (attempt.exam.subject.title if attempt.exam and attempt.exam.subject else 'N/A'),
-                'score': attempt.score,
-                'coefficient': ec.coefficient if ec else 1
-            })
+        if not ue_details:
+            # Fallback pour anciens relevés : reconstruction à plat par EC
+            papers = session.query(StudentPaper).join(Subject).join(EC).join(UE).filter(
+                StudentPaper.student_id == transcript.student_id,
+                UE.semester_id == transcript.semester_id,
+                StudentPaper.score.isnot(None)
+            ).all()
+            online_attempts = session.query(ExamAttempt).join(
+                OnlineExam, ExamAttempt.exam_id == OnlineExam.id
+            ).join(Subject, OnlineExam.subject_id == Subject.id).join(EC).join(UE).filter(
+                ExamAttempt.student_id == transcript.student_id,
+                UE.semester_id == transcript.semester_id,
+                ExamAttempt.score.isnot(None)
+            ).all()
+            # Regrouper par UE (structure minimale pour le PDF)
+            ue_map = {}
+            for p in papers:
+                ec = p.subject.ec
+                if not ec:
+                    continue
+                ue = ec.ue
+                if ue.id not in ue_map:
+                    ue_map[ue.id] = {'ue_code': ue.code, 'ue_name': ue.name,
+                                     'credits': ue.credits, 'ecs': [],
+                                     'moyenne': None, 'validated': None,
+                                     'validated_by_compensation': False, 'credits_acquis': 0}
+                ue_map[ue.id]['ecs'].append({'ec_code': ec.code, 'ec_name': ec.name,
+                                             'coefficient': ec.coefficient, 'note': p.score})
+            for att in online_attempts:
+                ec = att.exam.subject.ec if att.exam and att.exam.subject else None
+                if not ec:
+                    continue
+                ue = ec.ue
+                if ue.id not in ue_map:
+                    ue_map[ue.id] = {'ue_code': ue.code, 'ue_name': ue.name,
+                                     'credits': ue.credits, 'ecs': [],
+                                     'moyenne': None, 'validated': None,
+                                     'validated_by_compensation': False, 'credits_acquis': 0}
+                ue_map[ue.id]['ecs'].append({'ec_code': ec.code, 'ec_name': ec.name,
+                                             'coefficient': ec.coefficient, 'note': att.score})
+            ue_details = list(ue_map.values())
 
         transcript_data = {
             'student_name': transcript.student.full_name,
@@ -4624,7 +4717,7 @@ def export_transcript_pdf(transcript_id):
             'gpa': transcript.gpa,
             'total_credits': transcript.total_credits,
             'obtained_credits': transcript.obtained_credits,
-            'papers': notes_list,
+            'ue_details': ue_details,
             'generated_at': transcript.generated_at.strftime('%d/%m/%Y')
         }
         

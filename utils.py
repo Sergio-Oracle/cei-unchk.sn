@@ -1203,141 +1203,237 @@ CEI — Centre d'Examen Intelligent
 
 
 def generate_transcript_pdf(transcript_data, output_path):
-    """Générer un relevé de notes en PDF
+    """Générer un relevé de notes en PDF — structure LMD par UE avec compensation semestrielle.
     transcript_data = {
         'student_name', 'student_email', 'semester_name', 'formation_name',
-        'gpa', 'total_credits', 'obtained_credits', 'papers', 'generated_at'
+        'gpa', 'total_credits', 'obtained_credits', 'ue_details', 'generated_at'
     }
+    ue_details = liste de dicts {ue_code, ue_name, credits, moyenne, validated,
+                                  validated_by_compensation, credits_acquis,
+                                  ecs: [{ec_code, ec_name, coefficient, note}]}
     """
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.units import inch, cm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
     from reportlab.lib import colors
     from datetime import datetime
-    
-    doc = SimpleDocTemplate(output_path, pagesize=A4)
+
+    # Couleurs
+    C_BLUE      = colors.HexColor('#2563eb')
+    C_BLUE_DARK = colors.HexColor('#1e3a8a')
+    C_BLUE_LIGHT= colors.HexColor('#eff6ff')
+    C_GREEN     = colors.HexColor('#10b981')
+    C_GREEN_LIGHT=colors.HexColor('#ecfdf5')
+    C_RED       = colors.HexColor('#ef4444')
+    C_RED_LIGHT = colors.HexColor('#fef2f2')
+    C_ORANGE    = colors.HexColor('#f59e0b')
+    C_ORANGE_LIGHT=colors.HexColor('#fffbeb')
+    C_GRAY_50   = colors.HexColor('#f8fafc')
+    C_GRAY_100  = colors.HexColor('#f1f5f9')
+    C_GRAY_200  = colors.HexColor('#e2e8f0')
+    C_GRAY_500  = colors.HexColor('#64748b')
+    C_GRAY_900  = colors.HexColor('#0f172a')
+    C_WHITE     = colors.white
+
+    doc = SimpleDocTemplate(
+        output_path, pagesize=A4,
+        leftMargin=1.8*cm, rightMargin=1.8*cm,
+        topMargin=1.5*cm, bottomMargin=1.5*cm
+    )
     styles = getSampleStyleSheet()
     story = []
-    
-    # Style personnalisé
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=20,
-        textColor=colors.HexColor('#2563eb'),
-        spaceAfter=30,
-        alignment=1  # Centré
-    )
-    
-    header_style = ParagraphStyle(
-        'CustomHeader',
-        parent=styles['Heading2'],
-        fontSize=14,
-        textColor=colors.HexColor('#1e293b'),
-        spaceAfter=12
-    )
-    
-    # En-tête
-    story.append(Paragraph("RELEVÉ DE NOTES", title_style))
-    story.append(Spacer(1, 0.3*inch))
-    
-    # Informations étudiant
+
+    # ── Styles texte ──
+    title_style = ParagraphStyle('T1', parent=styles['Normal'],
+        fontSize=18, textColor=C_BLUE_DARK, fontName='Helvetica-Bold',
+        spaceAfter=4, alignment=1)
+    subtitle_style = ParagraphStyle('T2', parent=styles['Normal'],
+        fontSize=11, textColor=C_GRAY_500, spaceAfter=14, alignment=1)
+    ue_header_style = ParagraphStyle('UEH', parent=styles['Normal'],
+        fontSize=10, textColor=C_WHITE, fontName='Helvetica-Bold')
+    body_style = ParagraphStyle('B', parent=styles['Normal'],
+        fontSize=9, textColor=C_GRAY_900)
+    footer_style = ParagraphStyle('F', parent=styles['Normal'],
+        fontSize=8, textColor=C_GRAY_500, alignment=1)
+
+    # ── En-tête ──
+    story.append(Paragraph("RELEVÉ DE NOTES OFFICIEL", title_style))
+    story.append(Paragraph("Système LMD — Validation par Unité d'Enseignement", subtitle_style))
+    story.append(HRFlowable(width='100%', thickness=2, color=C_BLUE, spaceAfter=10))
+
+    # ── Fiche étudiant ──
+    gpa = transcript_data.get('gpa') or 0
     info_data = [
-        ['Étudiant:', transcript_data.get('student_name', 'N/A')],
-        ['Email:', transcript_data.get('student_email', 'N/A')],
-        ['Formation:', transcript_data.get('formation_name', 'N/A')],
-        ['Semestre:', transcript_data.get('semester_name', 'N/A')],
-        ['Date:', transcript_data.get('generated_at', datetime.now().strftime('%d/%m/%Y'))]
+        ['Étudiant :', transcript_data.get('student_name', 'N/A'),
+         'Formation :', transcript_data.get('formation_name', 'N/A')],
+        ['Email :', transcript_data.get('student_email', 'N/A'),
+         'Semestre :', transcript_data.get('semester_name', 'N/A')],
+        ['Date :', transcript_data.get('generated_at', datetime.now().strftime('%d/%m/%Y')),
+         'Année académique :', ''],
     ]
-    
-    info_table = Table(info_data, colWidths=[2*inch, 4*inch])
+    info_table = Table(info_data, colWidths=[2.2*cm, 7*cm, 2.5*cm, 6*cm])
     info_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f1f5f9')),
-        ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#1e293b')),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 0), (-1, -1), 11),
-        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e2e8f0')),
-        ('ROWBACKGROUNDS', (0, 0), (-1, -1), [colors.white, colors.HexColor('#f8fafc')])
+        ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),
+        ('FONTNAME', (2,0), (2,-1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 9),
+        ('TEXTCOLOR', (0,0), (-1,-1), C_GRAY_900),
+        ('BACKGROUND', (0,0), (-1,-1), C_GRAY_50),
+        ('GRID', (0,0), (-1,-1), 0.5, C_GRAY_200),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
     ]))
-    
     story.append(info_table)
-    story.append(Spacer(1, 0.4*inch))
-    
-    # Tableau des notes
-    story.append(Paragraph("Détail des Notes", header_style))
-    story.append(Spacer(1, 0.1*inch))
-    
-    papers = transcript_data.get('papers', [])
-    if papers:
-        notes_data = [['Code EC', 'Intitulé', 'Note/20', 'Coef']]
-        
-        for paper in papers:
-            notes_data.append([
-                paper.get('ec_code', 'N/A'),
-                paper.get('ec_name', 'N/A')[:40],  # Tronquer si trop long
-                str(paper.get('score', 0)),
-                str(paper.get('coefficient', 1))
-            ])
-        
-        notes_table = Table(notes_data, colWidths=[1.2*inch, 3*inch, 1*inch, 0.8*inch])
-        notes_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2563eb')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('ALIGN', (2, 0), (3, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e2e8f0')),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')])
+    story.append(Spacer(1, 0.3*cm))
+
+    # ── Bloc par UE ──
+    ue_details = transcript_data.get('ue_details') or []
+
+    for ue in ue_details:
+        moy_ue = ue.get('moyenne')
+        validated = ue.get('validated')
+        comp = ue.get('validated_by_compensation', False)
+        credits_ue = ue.get('credits', 0)
+        credits_acquis = ue.get('credits_acquis', 0)
+
+        if validated is True and comp:
+            ue_bg = C_ORANGE_LIGHT
+            ue_badge = f"VALIDÉ PAR COMPENSATION — {credits_acquis} crédit(s)"
+            badge_color = C_ORANGE
+        elif validated is True:
+            ue_bg = C_GREEN_LIGHT
+            ue_badge = f"VALIDÉ — {credits_acquis} crédit(s) acquis"
+            badge_color = C_GREEN
+        elif validated is False:
+            ue_bg = C_RED_LIGHT
+            ue_badge = f"NON VALIDÉ — 0/{credits_ue} crédit(s)"
+            badge_color = C_RED
+        else:
+            ue_bg = C_GRAY_50
+            ue_badge = "INCOMPLET"
+            badge_color = C_GRAY_500
+
+        moy_str = f"{moy_ue:.2f}/20" if moy_ue is not None else "—"
+
+        # En-tête UE
+        ue_hdr_data = [[
+            Paragraph(f"{ue.get('ue_code','?')} — {ue.get('ue_name','?')}", ue_header_style),
+            Paragraph(f"Moy. UE : {moy_str}", ParagraphStyle('UEM', parent=styles['Normal'],
+                fontSize=10, textColor=C_WHITE, fontName='Helvetica-Bold', alignment=2)),
+            Paragraph(ue_badge, ParagraphStyle('UEB', parent=styles['Normal'],
+                fontSize=9, textColor=badge_color, fontName='Helvetica-Bold', alignment=2)),
+        ]]
+        ue_hdr_table = Table(ue_hdr_data, colWidths=[9.5*cm, 4*cm, 4.5*cm])
+        ue_hdr_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), C_BLUE_DARK),
+            ('TEXTCOLOR', (2,0), (2,0), badge_color),
+            ('BACKGROUND', (2,0), (2,0), C_WHITE),
+            ('LEFTPADDING', (0,0), (-1,-1), 8),
+            ('RIGHTPADDING', (0,0), (-1,-1), 8),
+            ('TOPPADDING', (0,0), (-1,-1), 6),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ]))
-        
-        story.append(notes_table)
-    else:
-        story.append(Paragraph("Aucune note disponible", styles['BodyText']))
-    
-    story.append(Spacer(1, 0.4*inch))
-    
-    # Résumé
-    gpa = transcript_data.get('gpa', 0)
-    gpa_color = colors.HexColor('#10b981') if gpa >= 10 else colors.HexColor('#ef4444')
-    
+        story.append(ue_hdr_table)
+
+        # Lignes EC
+        ecs = ue.get('ecs', [])
+        if ecs:
+            ec_data = [['Code EC', 'Intitulé de l\'EC', 'Coef.', 'Note /20', 'Décision EC']]
+            for ec in ecs:
+                note = ec.get('note')
+                note_str = f"{note:.2f}" if note is not None else "—"
+                if note is None:
+                    dec = "—"
+                elif note >= 10:
+                    dec = "✓ Acquis"
+                else:
+                    dec = "✗ Ajourné"
+                ec_data.append([
+                    ec.get('ec_code', '?'),
+                    ec.get('ec_name', '?')[:45],
+                    str(ec.get('coefficient', 1)),
+                    note_str,
+                    dec
+                ])
+
+            ec_table = Table(ec_data, colWidths=[2.5*cm, 9*cm, 1.5*cm, 2.5*cm, 2.5*cm])
+            ec_style = [
+                ('BACKGROUND', (0,0), (-1,0), C_BLUE),
+                ('TEXTCOLOR', (0,0), (-1,0), C_WHITE),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0,0), (-1,-1), 8.5),
+                ('ALIGN', (2,0), (-1,-1), 'CENTER'),
+                ('GRID', (0,0), (-1,-1), 0.4, C_GRAY_200),
+                ('ROWBACKGROUNDS', (0,1), (-1,-1), [C_WHITE, C_GRAY_50]),
+                ('TOPPADDING', (0,0), (-1,-1), 4),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ]
+            # Colorier les décisions EC
+            for i, ec in enumerate(ecs, start=1):
+                note = ec.get('note')
+                if note is not None:
+                    col = C_GREEN if note >= 10 else C_RED
+                    ec_style.append(('TEXTCOLOR', (4, i), (4, i), col))
+                    ec_style.append(('FONTNAME', (4, i), (4, i), 'Helvetica-Bold'))
+            ec_table.setStyle(TableStyle(ec_style))
+            story.append(ec_table)
+        else:
+            story.append(Table([['Aucune note disponible pour cette UE']], colWidths=[18*cm]))
+
+        story.append(Spacer(1, 0.25*cm))
+
+    # ── Récapitulatif semestriel ──
+    story.append(Spacer(1, 0.2*cm))
+    story.append(HRFlowable(width='100%', thickness=1.5, color=C_GRAY_200, spaceAfter=8))
+
+    gpa_color = C_GREEN if gpa >= 10 else C_RED
+    decision_text = 'ADMIS(E)' if gpa >= 10 else 'AJOURNÉ(E)'
+    total_credits = transcript_data.get('total_credits', 0)
+    obtained_credits = transcript_data.get('obtained_credits', 0)
+
     summary_data = [
-        ['Moyenne Générale (GPA):', f"{gpa}/20"],
-        ['Crédits Totaux:', str(transcript_data.get('total_credits', 0))],
-        ['Crédits Obtenus:', str(transcript_data.get('obtained_credits', 0))],
-        ['Décision:', 'VALIDÉ' if gpa >= 10 else 'NON VALIDÉ']
+        ['Moyenne générale semestrielle :', f"{gpa:.2f} / 20",
+         'Crédits acquis :', f"{obtained_credits} / {total_credits}"],
+        ['Décision :', decision_text, '', ''],
     ]
-    
-    summary_table = Table(summary_data, colWidths=[3*inch, 3*inch])
-    summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f1f5f9')),
-        ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#1e293b')),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTNAME', (1, 0), (1, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 12),
-        ('GRID', (0, 0), (-1, -1), 2, colors.HexColor('#2563eb')),
-        ('TEXTCOLOR', (1, 0), (1, 0), gpa_color),
-        ('TEXTCOLOR', (1, 3), (1, 3), gpa_color)
-    ]))
-    
+    summary_table = Table(summary_data, colWidths=[6*cm, 4*cm, 4*cm, 4*cm])
+    summary_style = [
+        ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),
+        ('FONTNAME', (2,0), (2,-1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 10),
+        ('BACKGROUND', (0,0), (-1,-1), C_GRAY_100),
+        ('GRID', (0,0), (-1,-1), 0.5, C_GRAY_200),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('TEXTCOLOR', (1,0), (1,0), gpa_color),
+        ('FONTNAME', (1,0), (1,0), 'Helvetica-Bold'),
+        ('TEXTCOLOR', (1,1), (1,1), gpa_color),
+        ('FONTNAME', (1,1), (1,1), 'Helvetica-Bold'),
+        ('FONTSIZE', (1,1), (1,1), 12),
+        ('SPAN', (1,1), (3,1)),
+    ]
+    summary_table.setStyle(TableStyle(summary_style))
     story.append(summary_table)
-    
-    # Footer
-    story.append(Spacer(1, 0.5*inch))
-    footer_style = ParagraphStyle(
-        'Footer',
-        parent=styles['Normal'],
-        fontSize=9,
-        textColor=colors.HexColor('#64748b'),
-        alignment=1
+
+    # ── Légende ──
+    story.append(Spacer(1, 0.3*cm))
+    legende = (
+        "<b>Légende :</b> "
+        "<font color='#10b981'>VALIDÉ</font> : moyenne UE ≥ 10/20 — "
+        "<font color='#f59e0b'>VALIDÉ PAR COMPENSATION</font> : UE &lt; 10 mais moyenne semestrielle ≥ 10 — "
+        "<font color='#ef4444'>NON VALIDÉ</font> : moyenne UE &lt; 10 et semestre non compensé"
     )
-    story.append(Paragraph("Système de Notation Automatisé - Document officiel généré le " +
-                          datetime.now().strftime('%d/%m/%Y à %H:%M'), footer_style))
-    
-    # Générer le PDF
+    story.append(Paragraph(legende, ParagraphStyle('L', parent=styles['Normal'],
+        fontSize=7.5, textColor=C_GRAY_500, spaceAfter=10)))
+
+    # ── Pied de page ──
+    story.append(HRFlowable(width='100%', thickness=1, color=C_GRAY_200, spaceAfter=6))
+    story.append(Paragraph(
+        "Document officiel généré par le Système CEI — " +
+        datetime.now().strftime('%d/%m/%Y à %H:%M'),
+        footer_style
+    ))
+
     doc.build(story)
     return output_path

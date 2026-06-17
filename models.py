@@ -1,6 +1,7 @@
 """Modèles de base de données - Système de Notation Avancé VERSION COMPLÈTE avec détection de doublons"""
 from dotenv import load_dotenv
-import os 
+import os
+import json
 
 load_dotenv()
 
@@ -576,26 +577,33 @@ class ExamActivityLog(Base):
         }
 
 class GradeTranscript(Base):
-    """Relevé de notes d'un étudiant"""
+    """Relevé de notes d'un étudiant — validation par UE (logique LMD)"""
     __tablename__ = 'grade_transcripts'
-    
+
     id = Column(Integer, primary_key=True)
     student_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     semester_id = Column(Integer, ForeignKey('semesters.id'), nullable=False)
-    
+
     # Calculs automatiques
     total_credits = Column(Integer, default=0)
     obtained_credits = Column(Integer, default=0)
-    gpa = Column(Float)  # Moyenne générale pondérée
-    
+    gpa = Column(Float)  # Moyenne générale semestrielle pondérée par crédits UE
+    ue_details = Column(Text, nullable=True)  # JSON — détail par UE (logique LMD)
+
     generated_at = Column(DateTime, default=datetime.utcnow)
     generated_by_id = Column(Integer, ForeignKey('users.id'))
-    
+
     student = relationship('User', foreign_keys=[student_id])
     semester = relationship('Semester')
     generator = relationship('User', foreign_keys=[generated_by_id])
-    
+
     def to_dict(self):
+        ue_data = None
+        if self.ue_details:
+            try:
+                ue_data = json.loads(self.ue_details)
+            except Exception:
+                ue_data = None
         return {
             'id': self.id,
             'student_id': self.student_id,
@@ -605,6 +613,8 @@ class GradeTranscript(Base):
             'total_credits': self.total_credits,
             'obtained_credits': self.obtained_credits,
             'gpa': self.gpa,
+            'validated': (self.gpa >= 10) if self.gpa is not None else False,
+            'ue_details': ue_data,
             'generated_at': self.generated_at.isoformat() if self.generated_at else None
         }
 
