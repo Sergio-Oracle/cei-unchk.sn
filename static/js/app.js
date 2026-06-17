@@ -5864,6 +5864,8 @@ ${paper.grade || paper.feedback || 'Aucun feedback disponible'}
 
 async function loadOnlineExams() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    if (window._onlineExamsTimer) { clearTimeout(window._onlineExamsTimer); window._onlineExamsTimer = null; }
+    window._currentView = loadOnlineExams;
     showLoader(true);
 
     try {
@@ -6079,6 +6081,19 @@ async function loadOnlineExams() {
         }
 
         document.getElementById('main-content').innerHTML = html;
+
+        // Auto-refresh exactement au prochain changement d'état (start_time ou end_time)
+        const nowMs = Date.now();
+        const nextMs = exams
+            .flatMap(e => [new Date(e.start_time).getTime(), new Date(e.end_time).getTime()])
+            .filter(t => t > nowMs)
+            .sort((a, b) => a - b)[0];
+        if (nextMs) {
+            window._onlineExamsTimer = setTimeout(() => {
+                if (window._currentView === loadOnlineExams) loadOnlineExams();
+            }, Math.max(5000, nextMs - nowMs + 1500));
+        }
+
     } catch (error) {
         showAlert(humanError(error), 'error');
     } finally {
