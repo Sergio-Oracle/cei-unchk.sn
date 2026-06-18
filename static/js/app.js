@@ -11784,7 +11784,13 @@ async function _confirmSaveGeneratedSubjectChecked() {
 
 async function _confirmSaveGeneratedSubject(content, rubric, ecId) {
     // content et rubric viennent des textareas éditables
-    const title = (content.split('\n')[0] || 'Sujet généré par IA').replace(/^#+\s*/, '').substring(0, 100);
+    // Cherche la première ligne avec du vrai texte (ignore les séparateurs ══, ──, lignes vides, tirets)
+    const title = (
+        content.split('\n')
+            .map(l => l.replace(/^#+\s*/, '').replace(/^[\s═─━=\-_*]+$/, '').trim())
+            .find(l => l.length > 2)
+        || 'Sujet généré par IA'
+    ).substring(0, 100);
     const btn = document.getElementById('btn-confirm-save-subject');
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Enregistrement...'; }
 
