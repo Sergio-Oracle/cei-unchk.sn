@@ -7372,7 +7372,7 @@ async function saveToBankFromPreview() {
     const res = await authenticatedFetch('/api/question_bank', {
         method: 'POST',
         body: JSON.stringify({ content, rubric, ec_id: ecId || null, bloom_level: bloom, question_type: type,
-            title: (content.split('\n')[0] || 'Question').substring(0, 80) })
+            title: (content.split('\n').map(l=>l.replace(/^#+\s*/,'').replace(/^[\s═─━=\-_*]+$/,'').trim()).find(l=>l.length>2) || 'Question').substring(0, 80) })
     });
     if (res.ok) showAlert('Sauvegardé dans la banque de questions.', 'success');
     else showAlert('Erreur lors de la sauvegarde.', 'error');
