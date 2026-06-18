@@ -852,6 +852,7 @@ async function loadDashboard() {
 }
 
 async function loadAdminDashboard() {
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const response = await authenticatedFetch('/api/admin/dashboard');
@@ -920,6 +921,7 @@ async function loadAdminDashboard() {
 }
 
 async function loadProfessorDashboard() {
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const response = await authenticatedFetch('/api/professor/dashboard');
@@ -963,6 +965,7 @@ async function loadProfessorDashboard() {
 
 async function loadAdminCorrectedPapers() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const response = await authenticatedFetch('/api/admin/corrected_papers');
@@ -1015,6 +1018,7 @@ async function loadAdminCorrectedPapers() {
 }
 
 async function loadStudentDashboard() {
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const [papersRes, onlineRes] = await Promise.all([
@@ -1178,6 +1182,7 @@ async function loadStudentDashboard() {
 // ============================================================================
 async function loadUsers(searchQuery = '', niveauFilter = '') {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         // Toujours charger TOUS les utilisateurs — filtrage étudiant côté client
@@ -1639,6 +1644,7 @@ async function deleteUser(userId) {
 // ============================================================================
 async function loadSubjects() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const response = await authenticatedFetch('/api/subjects');
@@ -1953,6 +1959,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ============================================================================
 async function loadCreateSubject() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const [ecsResponse, formationsResponse] = await Promise.all([
@@ -2313,6 +2320,9 @@ async function handleCreateSubject(e) {
 }
 
 function showSubjectCreatedPreview(subject) {
+    // Garantit que le loader est caché avant tout rendu (le finally du caller peut
+    // s'exécuter après un repaint si une exception intermédiaire survient)
+    showLoader(false);
     const rubricHtml = (subject.rubric || '').replace(/\n/g, '<br>').replace(/══+/g, '<hr style="border-color:#3b82f6;margin:8px 0;">').replace(/──+/g, '<hr style="border-color:#e2e8f0;margin:4px 0;">');
     const contentHtml = (subject.content || '').replace(/\n/g, '<br>').replace(/══+/g, '<hr style="border-color:#3b82f6;margin:8px 0;">').replace(/──+/g, '<hr style="border-color:#e2e8f0;margin:4px 0;">');
 
@@ -2567,6 +2577,7 @@ async function confirmDeleteSubject(subjectId) {
 
 async function loadViewResults() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     
     try {
@@ -2773,6 +2784,7 @@ async function viewSubjectStatistics(subjectId) {
 // ============================================================================
 async function loadCorrectPapers() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const subjectsResponse = await authenticatedFetch('/api/subjects');
@@ -3414,6 +3426,7 @@ async function handleBatchCorrection(e) {
 async function loadSecurityReport() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
     window._currentView = loadSecurityReport;
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const res  = await authenticatedFetch('/api/admin/security_report');
@@ -3533,6 +3546,7 @@ async function loadSecurityReport() {
 
 async function loadReclamations() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const response = await authenticatedFetch('/api/reclamations');
@@ -3602,6 +3616,7 @@ async function loadMyTranscripts() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
     window._currentView = loadMyTranscripts;
     sessionStorage.setItem('_cei_student_view', 'loadMyTranscripts');
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const res = await authenticatedFetch('/api/student/transcripts');
@@ -3834,6 +3849,7 @@ async function loadExamSchedule() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
     window._currentView = loadExamSchedule;
     sessionStorage.setItem('_cei_student_view', 'loadExamSchedule');
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const res = await authenticatedFetch('/api/online_exams');
@@ -4101,6 +4117,7 @@ function showCreateReclamationModal(paperId) {
 // ============================================================================
 async function loadECAssignments() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const [ecsRes, usersRes] = await Promise.all([
@@ -4307,6 +4324,7 @@ async function confirmMultiAssign(ecId) {
 // ============================================================================
 async function loadStudentEnrollments() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const [formationsRes, studentsRes] = await Promise.all([
@@ -4564,6 +4582,7 @@ async function confirmEnrollByEC(studentId) {
 
 async function loadMaquette() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const response = await authenticatedFetch('/api/formations');
@@ -6128,6 +6147,7 @@ async function loadOnlineExams() {
     if (window._onlineExamsTimer) { clearTimeout(window._onlineExamsTimer); window._onlineExamsTimer = null; }
     window._currentView = loadOnlineExams;
     if (currentUser && currentUser.role === 'student') sessionStorage.setItem('_cei_student_view', 'loadOnlineExams');
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
 
     try {
@@ -7278,6 +7298,7 @@ async function _checkSubjectDuplicate(newContent) {
 // ============================================================================
 async function loadQuestionBank() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const res = await authenticatedFetch('/api/question_bank');
@@ -8538,6 +8559,7 @@ async function autoSubmitExam(attemptId) {
 
 async function loadTranscripts() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     
     try {
@@ -9149,6 +9171,7 @@ async function handleGenerateTranscript(e) {
 
 async function loadExamCorrections() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     
     try {
@@ -10057,6 +10080,7 @@ function showSignatureImage(encodedData, title, metaStr) {
 
 async function loadExamsHistory() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const response = await authenticatedFetch('/api/admin/exams_history');
@@ -10677,6 +10701,7 @@ function showCreateStudentNoEmailModal() {
 
 async function loadCorrectedPapersList() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     
     try {
@@ -11795,6 +11820,7 @@ async function _confirmSaveGeneratedSubject(content, rubric, ecId) {
 
 async function loadSurveillantDashboard() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const response = await authenticatedFetch('/api/surveillant/exams');
@@ -11930,6 +11956,7 @@ async function loadSurveillantDashboard() {
 
 async function loadSurveillantExams() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const response = await authenticatedFetch('/api/surveillant/exams');
@@ -13099,6 +13126,7 @@ let _calExams = [];
 
 async function loadExamCalendar() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const r = await authenticatedFetch('/api/online_exams');
@@ -13396,6 +13424,7 @@ async function downloadAttemptReportPDF(attemptId, studentName) {
 
 async function loadProfessorAnalytics() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
     showLoader(true);
     try {
         const r = await authenticatedFetch('/api/professor/analytics');
