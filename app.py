@@ -35,6 +35,7 @@ from models import (
     Formation, Semester, UE, EC, ECAssignment, StudentUEEnrollment,
     OnlineExam, ExamAttempt, ExamActivityLog, GradeTranscript, CameraLog,
     ExamStatus, AttemptStatus, ExamProctor, ProctorAssignment,
+    QuestionBank,
     get_session, init_db
 )
 
@@ -4632,7 +4633,8 @@ def get_all_transcripts():
                 'ue_details': ue_data,
                 'generated_by': generator_name,
                 'generated_by_id': t.generated_by_id,
-                'generated_at': t.generated_at.isoformat() if t.generated_at else None
+                'generated_at': t.generated_at.isoformat() if t.generated_at else None,
+                'is_published': bool(getattr(t, 'is_published', False)),
             })
         
         session.close()
@@ -4676,6 +4678,9 @@ def get_student_transcripts():
                 except Exception:
                     pass
 
+            # #29 — n'exposer que les relevés publiés aux étudiants
+            if not getattr(t, 'is_published', False):
+                continue
             transcripts_list.append({
                 'id': t.id,
                 'semester_name': t.semester.name if t.semester else 'N/A',
@@ -4687,14 +4692,15 @@ def get_student_transcripts():
                 'validated': (t.gpa >= 10) if t.gpa is not None else False,
                 'ue_details': ue_data,
                 'generated_by': generator_name,
-                'generated_at': t.generated_at.isoformat() if t.generated_at else None
+                'generated_at': t.generated_at.isoformat() if t.generated_at else None,
+                'is_published': True,
             })
-        
+
         session.close()
         return jsonify(transcripts_list)
     except Exception as e:
         print(f"❌ Erreur get_student_transcripts: {e}")
-        return jsonify({'error': str(e)}), 500   
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/transcripts/<int:transcript_id>/pdf', methods=['GET'])
 @jwt_required()
@@ -4923,6 +4929,197 @@ def delete_transcript(transcript_id):
     except Exception as e:
         print(f"Erreur delete_transcript: {e}")
         return jsonify({'error': str(e)}), 500
+
+# ============================================================================
+# #29 — PUBLICATION DES RELEVÉS DE NOTES
+# ============================================================================
+
+@app.route('/api/transcripts/<int:transcript_id>/publish', methods=['PUT'])
+@jwt_required()
+def toggle_transcript_publish(transcript_id):
+    """Publier ou masquer un relevé de notes (admin/prof uniquement)"""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if user.role not in [UserRole.ADMIN, UserRole.PROFESSOR]:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        t = session.query(GradeTranscript).filter_by(id=transcript_id).first()
+        if not t:
+            session.close()
+            return jsonify({'error': 'Relevé introuvable'}), 404
+        data = request.get_json() or {}
+        t.is_published = bool(data.get('is_published', not t.is_published))
+        session.commit()
+        result = {'success': True, 'is_published': t.is_published}
+        session.close()
+        return jsonify(result)
+    except Exception as e:
+        print(f"❌ toggle_transcript_publish: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# #4 — BANQUE DE QUESTIONS
+# ============================================================================
+
+@app.route('/api/question_bank', methods=['GET'])
+@jwt_required()
+def list_question_bank():
+    """Lister les questions sauvegardées (admin/prof)"""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if user.role not in [UserRole.ADMIN, UserRole.PROFESSOR]:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        questions = session.query(QuestionBank).order_by(QuestionBank.created_at.desc()).all()
+        result = [q.to_dict() for q in questions]
+        session.close()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/question_bank', methods=['POST'])
+@jwt_required()
+def save_question_bank():
+    """Sauvegarder une question dans la banque"""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if user.role not in [UserRole.ADMIN, UserRole.PROFESSOR]:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        data = request.get_json() or {}
+        if not data.get('content'):
+            session.close()
+            return jsonify({'error': 'Contenu requis'}), 400
+        q = QuestionBank(
+            title=(data.get('title') or data['content'][:80]).strip(),
+            content=data['content'].strip(),
+            rubric=data.get('rubric', ''),
+            question_type=data.get('question_type', 'open'),
+            bloom_level=data.get('bloom_level', ''),
+            ec_id=data.get('ec_id') or None,
+            created_by_id=user_id,
+        )
+        session.add(q)
+        session.commit()
+        result = q.to_dict()
+        session.close()
+        return jsonify({'success': True, 'question': result}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/question_bank/<int:q_id>', methods=['DELETE'])
+@jwt_required()
+def delete_question_bank(q_id):
+    """Supprimer une question de la banque"""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        q = session.query(QuestionBank).filter_by(id=q_id).first()
+        if not q:
+            session.close()
+            return jsonify({'error': 'Question introuvable'}), 404
+        if user.role != UserRole.ADMIN and q.created_by_id != user_id:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        session.delete(q)
+        session.commit()
+        session.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# #2 — INSCRIPTION MANUELLE D'UN ÉTUDIANT À UN EC (via UE parente)
+# ============================================================================
+
+@app.route('/api/admin/enroll_student_ec', methods=['POST'])
+@jwt_required()
+def enroll_student_ec():
+    """Inscrire un étudiant à la UE parente d'un EC donné (admin uniquement)"""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if user.role != UserRole.ADMIN:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        data = request.get_json() or {}
+        student_id = data.get('student_id')
+        ec_id = data.get('ec_id')
+        if not student_id or not ec_id:
+            session.close()
+            return jsonify({'error': 'student_id et ec_id requis'}), 400
+        ec = session.query(EC).filter_by(id=ec_id).first()
+        if not ec:
+            session.close()
+            return jsonify({'error': 'EC introuvable'}), 404
+        ue_id = ec.ue_id
+        existing = session.query(StudentUEEnrollment).filter_by(student_id=student_id, ue_id=ue_id).first()
+        if existing:
+            session.close()
+            return jsonify({'success': True, 'message': 'Déjà inscrit à cette UE'})
+        enroll = StudentUEEnrollment(student_id=student_id, ue_id=ue_id)
+        session.add(enroll)
+        session.commit()
+        session.close()
+        return jsonify({'success': True, 'message': 'Étudiant inscrit avec succès'}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# #7 — UPLOAD D'IMAGE POUR LES SUJETS D'EXAMEN
+# ============================================================================
+
+@app.route('/api/subjects/<int:subject_id>/upload_image', methods=['POST'])
+@jwt_required()
+def upload_subject_image(subject_id):
+    """Attacher une image à un sujet d'examen"""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        subject = session.query(Subject).filter_by(id=subject_id).first()
+        if not subject:
+            session.close()
+            return jsonify({'error': 'Sujet introuvable'}), 404
+        if user.role not in [UserRole.ADMIN, UserRole.PROFESSOR] or \
+           (user.role == UserRole.PROFESSOR and subject.creator_id != user_id):
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        if 'image' not in request.files:
+            session.close()
+            return jsonify({'error': 'Aucune image fournie'}), 400
+        img = request.files['image']
+        if not img.filename:
+            session.close()
+            return jsonify({'error': 'Fichier invalide'}), 400
+        import uuid
+        ext = img.filename.rsplit('.', 1)[-1].lower()
+        if ext not in ('png', 'jpg', 'jpeg', 'gif', 'webp'):
+            session.close()
+            return jsonify({'error': 'Format non supporté (PNG, JPG, GIF, WEBP)'}), 400
+        filename = f"subject_{subject_id}_{uuid.uuid4().hex[:8]}.{ext}"
+        save_path = Path(app.config['UPLOAD_FOLDER']) / filename
+        img.save(str(save_path))
+        subject.image_filename = filename
+        session.commit()
+        session.close()
+        return jsonify({'success': True, 'image_url': f"/uploads/{filename}"})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 # ============================================================================
 # LEVÉE DE BANNISSEMENT — PROF / ADMIN

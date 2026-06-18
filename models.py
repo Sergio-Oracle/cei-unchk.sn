@@ -592,6 +592,8 @@ class GradeTranscript(Base):
 
     generated_at = Column(DateTime, default=datetime.utcnow)
     generated_by_id = Column(Integer, ForeignKey('users.id'))
+    # #29 — publication contrôlée avant délibération
+    is_published = Column(Boolean, default=False)
 
     student = relationship('User', foreign_keys=[student_id])
     semester = relationship('Semester')
@@ -708,6 +710,38 @@ class CameraLog(Base):
         }
 
 
+# #4 — Banque de questions réutilisables
+class QuestionBank(Base):
+    """Question sauvegardée dans la banque pour réutilisation"""
+    __tablename__ = 'question_bank'
+
+    id = Column(Integer, primary_key=True)
+    title = Column(String(300), nullable=False)
+    content = Column(Text, nullable=False)       # texte complet de la question
+    rubric = Column(Text)                        # barème / correction
+    question_type = Column(String(30), default='open')  # open | qcm | vf
+    bloom_level = Column(String(50))             # Connaissance, Application, etc.
+    ec_id = Column(Integer, ForeignKey('ecs.id'), nullable=True)
+    created_by_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    ec = relationship('EC')
+    creator = relationship('User', foreign_keys=[created_by_id])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'content': self.content,
+            'rubric': self.rubric,
+            'question_type': self.question_type,
+            'bloom_level': self.bloom_level,
+            'ec_id': self.ec_id,
+            'ec_name': self.ec.name if self.ec else None,
+            'created_by': self.creator.full_name if self.creator else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
 # Configuration de la base de données
 DATABASE_URL = os.getenv('DATABASE_URL')
 
@@ -741,9 +775,14 @@ def init_db():
     # statement_timeout=2s évite les blocages si la table est verrouillée par l'app active
     from sqlalchemy import text as _text
     _migrations = [
-        # Vérification préalable: n'exécuter que si la colonne n'existe pas
         ("SELECT 1 FROM information_schema.columns WHERE table_name='proctor_assignments' AND column_name='student_id'",
          "ALTER TABLE proctor_assignments ADD COLUMN student_id INTEGER REFERENCES users(id)"),
+        # #29 — publication des relevés de notes
+        ("SELECT 1 FROM information_schema.columns WHERE table_name='grade_transcripts' AND column_name='is_published'",
+         "ALTER TABLE grade_transcripts ADD COLUMN is_published BOOLEAN DEFAULT FALSE"),
+        # #7 — image attachée au sujet
+        ("SELECT 1 FROM information_schema.columns WHERE table_name='subjects' AND column_name='image_filename'",
+         "ALTER TABLE subjects ADD COLUMN image_filename VARCHAR(255)"),
     ]
     with engine.connect() as _conn:
         # Timeout court pour éviter le blocage au démarrage si l'app tourne déjà

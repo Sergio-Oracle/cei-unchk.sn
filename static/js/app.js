@@ -726,6 +726,9 @@ function loadNavigation() {
                 <i class="fas fa-exclamation-triangle"></i> ${t('nav.reclamations')}
             </button>
             <div class="nav-divider">Administration</div>
+            <button class="nav-tab" onclick="loadQuestionBank()">
+                <i class="fas fa-database"></i> Banque questions
+            </button>
             <button class="nav-tab" onclick="loadProfessorAnalytics()">
                 <i class="fas fa-chart-bar"></i> Analytique
             </button>
@@ -764,6 +767,10 @@ function loadNavigation() {
         </button>
         <button class="nav-tab" onclick="loadExamCorrections()">
             <i class="fas fa-check-circle"></i> ${t('nav.correct_online')}
+        </button>
+        <div class="nav-divider">Ressources</div>
+        <button class="nav-tab" onclick="loadQuestionBank()">
+            <i class="fas fa-database"></i> Banque questions
         </button>
         <div class="nav-divider">Résultats</div>
         <button class="nav-tab" onclick="loadViewResults()">
@@ -1823,6 +1830,36 @@ async function loadSubjects() {
     }
 }
 
+// #7 — upload d'image pour un sujet
+async function uploadSubjectImage(subjectId, inputEl) {
+    const file = inputEl.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('image', file);
+    showLoader(true);
+    try {
+        const res = await fetch(`/api/subjects/${subjectId}/upload_image`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${authToken}` },
+            body: fd
+        });
+        const data = await res.json();
+        if (data.success) {
+            showAlert('Image attachée au sujet.', 'success');
+            // afficher l'image inline
+            const prev = inputEl.parentElement.previousElementSibling;
+            if (prev && !prev.querySelector('img')) {
+                const img = document.createElement('div');
+                img.innerHTML = `<img src="${data.image_url}" alt="Image" style="max-width:100%;border-radius:8px;border:1px solid #e2e8f0;margin-top:8px;">`;
+                inputEl.parentElement.insertAdjacentElement('beforebegin', img);
+            }
+        } else {
+            showAlert(data.error || 'Erreur lors de l\'upload.', 'error');
+        }
+    } catch { showAlert('Impossible d\'uploader l\'image.', 'error'); }
+    finally { showLoader(false); }
+}
+
 function loadMySubjects() {
     loadSubjects();
 }
@@ -2318,6 +2355,13 @@ function showSubjectCreatedPreview(subject) {
                     <h3 style="margin:0;font-size:16px;">Contenu du Sujet</h3>
                 </div>
                 <div style="max-height:350px;overflow-y:auto;padding:16px;background:#f8fafc;border-radius:8px;font-family:monospace;font-size:13px;line-height:1.7;white-space:pre-wrap;">${subject.content || 'Contenu non disponible'}</div>
+                <!-- #7 — image attachée -->
+                ${subject.image_url ? `<div style="margin-top:12px;"><img src="${subject.image_url}" alt="Image du sujet" style="max-width:100%;border-radius:8px;border:1px solid #e2e8f0;"></div>` : ''}
+                <div style="margin-top:12px;display:flex;align-items:center;gap:10px;">
+                    <label style="font-size:13px;color:#64748b;font-weight:600;"><i class="fas fa-image"></i> Attacher une image :</label>
+                    <input type="file" id="subject-img-${subject.id}" accept="image/png,image/jpeg,image/gif,image/webp"
+                        style="font-size:13px;" onchange="uploadSubjectImage(${subject.id}, this)">
+                </div>
             </div>
 
             <!-- Barème généré -->
@@ -4109,6 +4153,12 @@ async function loadECAssignments() {
                                     onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">
                                     <i class="fas fa-link"></i> Assigner
                                 </button>
+                                <!-- #1 — multi-affectation -->
+                                <button onclick="showMultiAssignModal(${ec.id}, '${ec.name.replace(/'/g,"\\'")}')"
+                                    style="display:inline-flex;align-items:center;gap:5px;padding:7px 10px;background:#fdf4ff;color:#7c3aed;border:1px solid #e9d5ff;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .15s;"
+                                    title="Affecter plusieurs professeurs">
+                                    <i class="fas fa-users"></i>
+                                </button>
                             </div>
                         </td>
                     </tr>
@@ -4175,16 +4225,17 @@ async function loadECAssignments() {
     }
 }
 
+// #1 — affectation multi-professeurs à un EC
 async function assignECToProfessor(ecId) {
     const select = document.getElementById(`ec-professor-${ecId}`);
-    const professorId = select.value;
+    const professorId = select ? select.value : null;
     if (!professorId) {
         showAlert('Veuillez sélectionner un professeur', 'warning');
         return;
     }
     showLoader(true);
     try {
-        let response = await authenticatedFetch(`/api/admin/ecs/${ecId}/assign`, {
+        const response = await authenticatedFetch(`/api/admin/ecs/${ecId}/assign`, {
             method: 'POST',
             body: JSON.stringify({ professor_id: professorId })
         });
@@ -4192,13 +4243,63 @@ async function assignECToProfessor(ecId) {
             showAlert("L'EC a été assigné au professeur avec succès.", 'success');
             loadECAssignments();
         } else {
-            showAlert('Impossible d\'effectuer l\'affectation. Veuillez réessayer.', 'error');
+            const d = await response.json().catch(() => ({}));
+            showAlert(d.error || 'Impossible d\'effectuer l\'affectation. Veuillez réessayer.', 'error');
         }
     } catch (error) {
         showAlert(humanError(error), 'error');
     } finally {
         showLoader(false);
     }
+}
+
+// #1 — afficher tous les professeurs déjà assignés + ajouter d'autres
+async function showMultiAssignModal(ecId, ecName) {
+    showLoader(true);
+    try {
+        const [usersRes, ecsRes] = await Promise.all([
+            authenticatedFetch('/api/admin/users'),
+            authenticatedFetch('/api/ecs')
+        ]);
+        const allUsers   = await usersRes.json();
+        const professors = allUsers.filter(u => u.role === 'professor');
+        const ecs        = await ecsRes.json();
+        const thisEc     = ecs.find(e => e.id === ecId);
+        const assignedIds = (thisEc && thisEc.professors) ? thisEc.professors.map(p => p.id) : (thisEc && thisEc.professor_id ? [thisEc.professor_id] : []);
+
+        const checkboxes = professors.map(p => {
+            const chk = assignedIds.includes(p.id) ? 'checked disabled' : '';
+            return `<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:7px;cursor:${chk?'default':'pointer'};background:${assignedIds.includes(p.id)?'#f0fdf4':'#f8fafc'};margin-bottom:5px;border:1px solid ${assignedIds.includes(p.id)?'#bbf7d0':'#e2e8f0'};">
+                <input type="checkbox" value="${p.id}" ${chk} style="width:16px;height:16px;accent-color:#3b82f6;">
+                <span style="font-size:14px;${assignedIds.includes(p.id)?'color:#15803d;font-weight:600;':''}">${p.full_name}</span>
+                ${assignedIds.includes(p.id)?'<span style="margin-left:auto;font-size:11px;color:#15803d;"><i class="fas fa-check-circle"></i> Assigné</span>':''}
+            </label>`;
+        }).join('');
+
+        showModal(`
+            <h3 style="margin:0 0 4px;font-size:18px;font-weight:700;color:#0f172a;"><i class="fas fa-link" style="color:#3b82f6;margin-right:8px;"></i>Affecter des professeurs</h3>
+            <p style="margin:0 0 16px;font-size:13px;color:#64748b;">EC : <strong>${ecName}</strong></p>
+            <div id="multi-assign-list" style="max-height:300px;overflow-y:auto;">${checkboxes}</div>
+            <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+                <button class="btn btn-secondary" onclick="closeModal()"><i class="fas fa-times"></i> Fermer</button>
+                <button class="btn btn-primary" onclick="confirmMultiAssign(${ecId})"><i class="fas fa-save"></i> Assigner la sélection</button>
+            </div>`, '480px');
+    } finally { showLoader(false); }
+}
+
+async function confirmMultiAssign(ecId) {
+    const checked = [...document.querySelectorAll('#multi-assign-list input[type=checkbox]:checked:not([disabled])')].map(c => c.value);
+    if (!checked.length) { showAlert('Aucun nouveau professeur sélectionné.', 'warning'); return; }
+    let ok = 0, fail = 0;
+    for (const profId of checked) {
+        const res = await authenticatedFetch(`/api/admin/ecs/${ecId}/assign`, {
+            method: 'POST', body: JSON.stringify({ professor_id: profId })
+        });
+        if (res.ok) ok++; else fail++;
+    }
+    closeModal();
+    if (ok) showAlert(`${ok} professeur(s) assigné(s) avec succès.${fail?' '+fail+' échec(s).':''}`, ok && !fail ? 'success' : 'warning');
+    loadECAssignments();
 }
 
 // ============================================================================
@@ -4262,11 +4363,19 @@ async function loadStudentEnrollments() {
                             </select>
                         </td>
                         <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;">
-                            <button onclick="enrollStudentToUE(${student.id})"
-                                style="display:inline-flex;align-items:center;gap:5px;padding:7px 13px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .15s;"
-                                onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">
-                                <i class="fas fa-circle-plus"></i> Inscrire
-                            </button>
+                            <div style="display:flex;gap:6px;">
+                                <button onclick="enrollStudentToUE(${student.id})"
+                                    style="display:inline-flex;align-items:center;gap:5px;padding:7px 13px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .15s;"
+                                    onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">
+                                    <i class="fas fa-circle-plus"></i> Inscrire (UE)
+                                </button>
+                                <!-- #2 — inscription directe par EC -->
+                                <button onclick="showEnrollByECModal(${student.id}, '${(student.full_name||'').replace(/'/g,"\\'")}')"
+                                    style="display:inline-flex;align-items:center;gap:5px;padding:7px 10px;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .15s;"
+                                    title="Inscrire à un EC spécifique">
+                                    <i class="fas fa-book-open"></i> EC
+                                </button>
+                            </div>
                         </td>
                     </tr>
                 `;
@@ -4411,6 +4520,44 @@ async function enrollStudentToUE(studentId) {
         showLoader(false);
     }
 }
+// #2 — inscription directe par EC
+async function showEnrollByECModal(studentId, studentName) {
+    showLoader(true);
+    try {
+        const res = await authenticatedFetch('/api/ecs');
+        const ecs = res.ok ? await res.json() : [];
+        const options = ecs.map(e => `<option value="${e.id}">[${e.code}] ${e.name} — ${e.ue_code||''}</option>`).join('');
+        showModal(`
+            <h3 style="margin:0 0 4px;font-size:18px;font-weight:700;"><i class="fas fa-book-open" style="color:#10b981;margin-right:8px;"></i>Inscription directe par EC</h3>
+            <p style="margin:0 0 14px;font-size:13px;color:#64748b;">Étudiant : <strong>${studentName}</strong><br>
+            L'étudiant sera inscrit à l'UE parente de l'EC sélectionné.</p>
+            <div class="form-group" style="margin-bottom:14px;">
+                <label class="form-label">Sélectionner l'EC</label>
+                <input type="text" id="ec-enroll-filter" placeholder="Filtrer par code ou nom…"
+                    style="width:100%;padding:7px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;margin-bottom:6px;box-sizing:border-box;"
+                    oninput="[...document.getElementById('ec-enroll-select').options].forEach(o=>o.hidden=!!this.value&&!o.text.toLowerCase().includes(this.value.toLowerCase()))">
+                <select id="ec-enroll-select" class="form-select" size="5">${options}</select>
+            </div>
+            <div style="display:flex;gap:10px;justify-content:flex-end;">
+                <button class="btn btn-secondary" onclick="closeModal()">Annuler</button>
+                <button class="btn btn-success" onclick="confirmEnrollByEC(${studentId})"><i class="fas fa-check"></i> Inscrire</button>
+            </div>`, '460px');
+    } finally { showLoader(false); }
+}
+
+async function confirmEnrollByEC(studentId) {
+    const select = document.getElementById('ec-enroll-select');
+    const ecId   = select && select.value;
+    if (!ecId) { showAlert('Veuillez sélectionner un EC.', 'warning'); return; }
+    const res = await authenticatedFetch('/api/admin/enroll_student_ec', {
+        method: 'POST', body: JSON.stringify({ student_id: studentId, ec_id: ecId })
+    });
+    const data = await res.json();
+    closeModal();
+    if (data.success) { showAlert(data.message || 'Inscription effectuée.', 'success'); loadStudentEnrollments(); }
+    else showAlert(data.error || 'Erreur lors de l\'inscription.', 'error');
+}
+
 // ============================================================================
 // GESTION DE LA MAQUETTE PÉDAGOGIQUE COMPLÈTE
 // ============================================================================
@@ -4607,8 +4754,9 @@ async function loadMaquette() {
             
             html += `</div>`;
         }
-        
+
         document.getElementById('main-content').innerHTML = html;
+        setTimeout(_applySearchableSelects, 50);
     } catch (error) {
         showAlert(humanError(error), 'error');
     } finally {
@@ -7015,6 +7163,200 @@ function stripBaremeFromContent(content) {
 // PARSING & RENDU INTERACTIF DU SUJET D'EXAMEN (QCM + Questions Ouvertes)
 // ============================================================================
 
+// ============================================================================
+// #27 — SÉLECT AVEC FILTRE DE RECHERCHE
+// ============================================================================
+function _makeSearchable(selectEl, placeholder) {
+    if (!selectEl || selectEl.dataset.searchable) return;
+    selectEl.dataset.searchable = '1';
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;display:inline-block;width:100%;';
+    selectEl.parentNode.insertBefore(wrap, selectEl);
+    wrap.appendChild(selectEl);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = placeholder || 'Rechercher…';
+    input.style.cssText = 'width:100%;padding:7px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;box-sizing:border-box;margin-bottom:4px;outline:none;';
+    input.addEventListener('focus', () => { input.style.borderColor = '#3b82f6'; });
+    input.addEventListener('blur',  () => { input.style.borderColor = '#e2e8f0'; });
+    wrap.insertBefore(input, selectEl);
+    const allOptions = [...selectEl.options].map(o => ({ text: o.text, value: o.value, el: o }));
+    input.addEventListener('input', () => {
+        const q = input.value.toLowerCase();
+        allOptions.forEach(({ text, value, el }) => {
+            el.hidden = !!q && !text.toLowerCase().includes(q) && !value.toLowerCase().includes(q);
+        });
+    });
+}
+
+// Applique _makeSearchable sur tous les selects d'EC au prochain render
+function _applySearchableSelects() {
+    document.querySelectorAll('.ec-professor-select, .ec-select-searchable').forEach(sel => {
+        _makeSearchable(sel, 'Filtrer par nom ou code…');
+    });
+}
+
+// ============================================================================
+// #9 — PANIER DE VERSIONS IA
+// ============================================================================
+let _aiVersions = [];
+
+function _addVersionToBasket(content, rubric) {
+    if (_aiVersions.length >= 3) _aiVersions.shift();
+    _aiVersions.push({ content, rubric, ts: new Date().toLocaleTimeString() });
+    _updateBasketBadge();
+    showAlert(`Version ajoutée au panier (${_aiVersions.length}/3).`, 'success');
+}
+
+function _updateBasketBadge() {
+    const badge = document.getElementById('ai-basket-badge');
+    if (badge) {
+        badge.textContent = _aiVersions.length;
+        badge.style.display = _aiVersions.length ? 'inline-flex' : 'none';
+    }
+}
+
+function _showBasketComparison() {
+    if (!_aiVersions.length) { showAlert('Le panier est vide.', 'warning'); return; }
+    const cols = _aiVersions.map((v, i) => `
+        <div style="flex:1;min-width:260px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <strong style="font-size:13px;color:#0f172a;">Version ${i+1} <span style="font-size:11px;color:#94a3b8;">${v.ts}</span></strong>
+                <button onclick="_useBasketVersion(${i})" style="background:#3b82f6;border:none;color:#fff;padding:5px 10px;border-radius:6px;font-size:12px;cursor:pointer;">Utiliser</button>
+            </div>
+            <textarea readonly rows="10" style="width:100%;font-size:12px;font-family:monospace;border:1px solid #e2e8f0;border-radius:6px;padding:8px;resize:none;box-sizing:border-box;">${_esc(v.content)}</textarea>
+        </div>`).join('');
+    showModal(`
+        <h3 style="margin:0 0 16px;font-size:18px;">Comparer les versions IA</h3>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;">${cols}</div>
+        <div style="text-align:right;margin-top:16px;">
+            <button class="btn btn-secondary" onclick="closeModal()">Fermer</button>
+            <button class="btn btn-danger" onclick="_clearBasket()" style="margin-left:8px;">Vider le panier</button>
+        </div>`, '900px');
+}
+
+function _useBasketVersion(idx) {
+    const v = _aiVersions[idx];
+    if (!v) return;
+    const ta = document.getElementById('preview-content-edit');
+    const tr = document.getElementById('preview-rubric-edit');
+    if (ta) ta.value = v.content;
+    if (tr && v.rubric) tr.value = v.rubric;
+    closeModal();
+    showAlert('Version chargée dans l\'éditeur.', 'success');
+}
+
+function _clearBasket() { _aiVersions = []; _updateBasketBadge(); closeModal(); }
+
+// ============================================================================
+// #10 — DÉTECTION DE DOUBLONS AVANT VALIDATION
+// ============================================================================
+let _allSubjectCache = null;
+
+async function _checkSubjectDuplicate(newContent) {
+    try {
+        if (!_allSubjectCache) {
+            const res = await authenticatedFetch('/api/subjects');
+            _allSubjectCache = res.ok ? await res.json() : [];
+        }
+        const words = s => new Set(s.toLowerCase().match(/\b\w{4,}\b/g) || []);
+        const newWords = words(newContent);
+        for (const sub of _allSubjectCache) {
+            const existing = words(sub.content || '');
+            const inter = [...newWords].filter(w => existing.has(w)).length;
+            const union = new Set([...newWords, ...existing]).size;
+            if (union > 0 && inter / union > 0.55) {
+                return { duplicate: true, title: sub.title };
+            }
+        }
+    } catch { /* silently ignore */ }
+    return { duplicate: false };
+}
+
+// ============================================================================
+// #4 — BANQUE DE QUESTIONS
+// ============================================================================
+async function loadQuestionBank() {
+    if (window.event && window.event.target) setActiveTab(window.event.target);
+    showLoader(true);
+    try {
+        const res = await authenticatedFetch('/api/question_bank');
+        const questions = res.ok ? await res.json() : [];
+        const rows = questions.length === 0
+            ? `<tr><td colspan="5" style="padding:40px;text-align:center;color:#94a3b8;"><i class="fas fa-inbox" style="font-size:28px;display:block;margin-bottom:8px;"></i>Banque vide. Sauvegardez des questions depuis la génération IA.</td></tr>`
+            : questions.map(q => `
+                <tr style="transition:background .15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
+                    <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:600;color:#0f172a;">${_esc(q.title)}</td>
+                    <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;">
+                        <span style="background:#ede9fe;color:#6d28d9;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;">${q.question_type||'open'}</span>
+                    </td>
+                    <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#64748b;">${q.bloom_level||'—'}</td>
+                    <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#64748b;">${q.ec_name||'—'}</td>
+                    <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;">
+                        <div style="display:flex;gap:6px;">
+                            <button onclick="_previewBankQuestion(${q.id})" style="background:#eff6ff;border:none;color:#3b82f6;padding:5px 10px;border-radius:6px;font-size:12px;cursor:pointer;"><i class="fas fa-eye"></i></button>
+                            <button onclick="deleteBankQuestion(${q.id})" style="background:#fef2f2;border:none;color:#ef4444;padding:5px 10px;border-radius:6px;font-size:12px;cursor:pointer;"><i class="fas fa-trash"></i></button>
+                        </div>
+                    </td>
+                </tr>`).join('');
+        document.getElementById('main-content').innerHTML = `
+            <div style="padding:24px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+                    <div>
+                        <h2 style="margin:0;font-size:22px;font-weight:700;color:#0f172a;"><i class="fas fa-database" style="color:#8b5cf6;margin-right:8px;"></i>Banque de Questions</h2>
+                        <p style="margin:4px 0 0;font-size:13px;color:#64748b;">${questions.length} question(s) sauvegardée(s)</p>
+                    </div>
+                </div>
+                <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.07);overflow:hidden;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead><tr style="background:#f8fafc;">
+                            <th style="padding:12px 14px;text-align:left;font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">Titre</th>
+                            <th style="padding:12px 14px;text-align:left;font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">Type</th>
+                            <th style="padding:12px 14px;text-align:left;font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">Bloom</th>
+                            <th style="padding:12px 14px;text-align:left;font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">EC</th>
+                            <th style="padding:12px 14px;text-align:left;font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">Actions</th>
+                        </tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>`;
+        window._bankQuestionsCache = questions;
+    } finally { showLoader(false); }
+}
+
+window._bankQuestionsCache = [];
+function _previewBankQuestion(id) {
+    const q = (window._bankQuestionsCache || []).find(x => x.id === id);
+    if (!q) return;
+    showModal(`
+        <h3 style="margin:0 0 12px;font-size:17px;">${_esc(q.title)}</h3>
+        <pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;font-size:13px;white-space:pre-wrap;max-height:320px;overflow-y:auto;">${_esc(q.content)}</pre>
+        ${q.rubric ? `<h4 style="margin:12px 0 6px;font-size:14px;">Barème</h4><pre style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px;font-size:12px;white-space:pre-wrap;">${_esc(q.rubric)}</pre>` : ''}
+        <div style="text-align:right;margin-top:14px;"><button class="btn btn-secondary" onclick="closeModal()">Fermer</button></div>`, '560px');
+}
+
+async function deleteBankQuestion(id) {
+    if (!confirm('Supprimer cette question de la banque ?')) return;
+    const res = await authenticatedFetch(`/api/question_bank/${id}`, { method: 'DELETE' });
+    if (res.ok) { showAlert('Question supprimée.', 'success'); loadQuestionBank(); }
+}
+
+async function saveToBankFromPreview() {
+    const content = document.getElementById('preview-content-edit')?.value || '';
+    const rubric  = document.getElementById('preview-rubric-edit')?.value || '';
+    const ecId    = document.getElementById('ai-ec-id')?.value || null;
+    const bloom   = [...document.querySelectorAll('[id^="ai-bloom-"]')].filter(c=>c.checked).map(c=>c.id.replace('ai-bloom-','')).join(', ');
+    const type    = document.getElementById('ai-type-qcm')?.checked ? 'qcm' : 'open';
+    if (!content) { showAlert('Aucun contenu à sauvegarder.', 'warning'); return; }
+    const res = await authenticatedFetch('/api/question_bank', {
+        method: 'POST',
+        body: JSON.stringify({ content, rubric, ec_id: ecId || null, bloom_level: bloom, question_type: type,
+            title: (content.split('\n')[0] || 'Question').substring(0, 80) })
+    });
+    if (res.ok) showAlert('Sauvegardé dans la banque de questions.', 'success');
+    else showAlert('Erreur lors de la sauvegarde.', 'error');
+}
+
 function _esc(s) {
     return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -7023,6 +7365,7 @@ function _parseExamBlocks(raw) {
     // Retourne un tableau de blocs : {type:'text'|'qcm'|'open', num, text, extraLines, choices}
     const QNUM  = /^(\d{1,2})\s*[.)\-:]\s*(.*)/;     // 1.  1)  1-  1:  ...
     const CHOIX = /^([A-Fa-f])\s*[.)\-:]\s*(.*)/;    // A)  A.  a)  a-  ...
+    const VF_Q  = /\bvrai\s*[/\/|]\s*faux\b|\bv\s*[/\/|]\s*f\b/i;   // #23 — Vrai/Faux
 
     const lines = raw.split('\n');
     const blocks = [];
@@ -7185,16 +7528,21 @@ function _renderExamAnswerSection(blocks, savedData) {
             return;
         }
 
-        const isQCM    = block.type === 'qcm';
-        const savedVal = isQCM ? (qcmData[block.num] || '') : (texteData[block.num] || '');
-        const answered = isQCM ? !!savedVal : !!(savedVal && savedVal.trim());
-        const border   = answered ? (isQCM ? '#3b82f6' : '#10b981') : '#e2e8f0';
+        // #23 — détecter Vrai/Faux dans le texte de la question
+        const isVF  = block.type === 'qcm' && block.choices.length === 0 && VF_Q.test(block.text);
+        const isQCM = block.type === 'qcm' && !isVF;
+        const effectiveType = isVF ? 'vf' : block.type;
+        const savedVal = (isQCM || isVF) ? (qcmData[block.num] || '') : (texteData[block.num] || '');
+        const answered = (isQCM || isVF) ? !!savedVal : !!(savedVal && savedVal.trim());
+        const border   = answered ? ((isQCM || isVF) ? '#3b82f6' : '#10b981') : '#e2e8f0';
 
-        const badge = isQCM
-            ? `<span style="background:#eff6ff;color:#3b82f6;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:700;margin-left:8px;vertical-align:middle;">QCM</span>`
-            : `<span style="background:#ecfdf5;color:#065f46;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:700;margin-left:8px;vertical-align:middle;">Ouvert</span>`;
+        const badge = isVF
+            ? `<span style="background:#fdf4ff;color:#7c3aed;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:700;margin-left:8px;vertical-align:middle;">V / F</span>`
+            : isQCM
+                ? `<span style="background:#eff6ff;color:#3b82f6;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:700;margin-left:8px;vertical-align:middle;">QCM</span>`
+                : `<span style="background:#ecfdf5;color:#065f46;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:700;margin-left:8px;vertical-align:middle;">Ouvert</span>`;
 
-        qHtml += `<div class="exam-q-block" id="qblock-${block.num}" data-qnum="${block.num}" data-type="${block.type}"
+        qHtml += `<div class="exam-q-block" id="qblock-${block.num}" data-qnum="${block.num}" data-type="${effectiveType}"
             style="border:1.5px solid ${border};border-radius:12px;padding:16px 18px;margin-bottom:12px;background:#fff;transition:border-color .2s;">
             <div style="font-weight:700;font-size:14px;color:#0f172a;margin-bottom:8px;">
                 Question ${block.num} ${badge}
@@ -7204,7 +7552,22 @@ function _renderExamAnswerSection(blocks, savedData) {
                 ? `<div style="font-size:14px;color:#1e293b;margin-bottom:12px;line-height:1.6;">${block.extraLines.map(_esc).join('<br>')}</div>`
                 : ''}`;
 
-        if (isQCM) {
+        if (isVF) {
+            // #23 — boutons Vrai / Faux
+            qHtml += `<div style="display:flex;gap:12px;">`;
+            ['V', 'F'].forEach(letter => {
+                const label = letter === 'V' ? 'Vrai' : 'Faux';
+                const sel = savedVal === letter;
+                qHtml += `
+                <label class="qcm-choice-label" id="choice-lbl-${block.num}-${letter}"
+                    style="flex:1;display:flex;align-items:center;justify-content:center;gap:10px;padding:14px;border-radius:10px;border:2px solid ${sel?(letter==='V'?'#10b981':'#ef4444'):'#e2e8f0'};background:${sel?(letter==='V'?'#f0fdf4':'#fef2f2'):'#f8fafc'};cursor:pointer;font-size:16px;font-weight:700;transition:all .15s;"
+                    onclick="_onQCMSelect('${block.num}','${letter}')">
+                    <input type="radio" name="qcm_q${block.num}" value="${letter}" ${sel?'checked':''} style="display:none;">
+                    <span style="font-size:22px;">${letter==='V'?'✅':'❌'}</span> ${label}
+                </label>`;
+            });
+            qHtml += `</div>`;
+        } else if (isQCM) {
             qHtml += `<div class="qcm-choices-group" id="choices-${block.num}">`;
             block.choices.forEach(c => {
                 const sel    = savedVal === c.letter;
@@ -8227,7 +8590,7 @@ async function loadStudentTranscripts() {
                 <i class="fas fa-info-circle" style="font-size:28px;margin-top:2px;flex-shrink:0;"></i>
                 <div>
                     <strong>Pas encore de relevé disponible</strong>
-                    <p style="margin:8px 0 4px;">Votre relevé de notes est généré par votre professeur ou l'administration une fois vos examens corrigés et validés.</p>
+                    <p style="margin:8px 0 4px;">Votre relevé de notes est généré par votre professeur ou l'administration une fois vos examens corrigés et validés. Il sera visible ici uniquement après délibération officielle.</p>
                     <p style="margin:4px 0;">Si vos examens ont déjà été corrigés et que vous n'avez toujours pas de relevé, contactez votre enseignant ou l'administration.</p>
                 </div>
             </div>
@@ -8408,6 +8771,7 @@ async function loadAllTranscripts() {
                         <th><i class="fas fa-star"></i> Moyenne</th>
                         <th><i class="fas fa-award"></i> Crédits</th>
                         <th><i class="fas fa-check-circle"></i> Statut</th>
+                        <th><i class="fas fa-eye"></i> Publié</th>
                         <th><i class="fas fa-clock"></i> Généré le</th>
                         <th><i class="fas fa-cog"></i> Actions</th>
                     </tr>
@@ -8440,6 +8804,17 @@ async function loadAllTranscripts() {
                     <td><strong style="color: ${gpaColor}; font-size: 16px;">${transcript.gpa}/20</strong></td>
                     <td>${transcript.obtained_credits}/${transcript.total_credits}</td>
                     <td><span class="status-badge ${statusClass}">${statusLabel}</span></td>
+                    <td>
+                        <!-- #29 — toggle publication -->
+                        <button id="pub-btn-${transcript.id}" onclick="toggleTranscriptPublish(${transcript.id})"
+                            style="border:none;border-radius:20px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;
+                            background:${transcript.is_published ? '#dcfce7' : '#f1f5f9'};
+                            color:${transcript.is_published ? '#15803d' : '#64748b'};"
+                            title="${transcript.is_published ? 'Cliquer pour masquer' : 'Cliquer pour publier'}">
+                            <i class="fas fa-${transcript.is_published ? 'eye' : 'eye-slash'}"></i>
+                            ${transcript.is_published ? 'Publié' : 'Masqué'}
+                        </button>
+                    </td>
                     <td>
                         <div style="font-size:12px;">${new Date(transcript.generated_at).toLocaleDateString('fr-FR')}</div>
                         <small style="color:#64748b;">${transcript.generated_by || 'Système'}</small>
@@ -9983,6 +10358,29 @@ if (currentUser && currentUser.role === 'professor') {
     setInterval(loadProfessorNotifications, 60000); // Toutes les minutes
 }
 
+// #29 — publier / masquer un relevé (toggle)
+async function toggleTranscriptPublish(transcriptId) {
+    const btn = document.getElementById(`pub-btn-${transcriptId}`);
+    if (!btn) return;
+    const currentlyPublished = btn.textContent.trim().startsWith('Publié');
+    try {
+        const res = await authenticatedFetch(`/api/transcripts/${transcriptId}/publish`, {
+            method: 'PUT',
+            body: JSON.stringify({ is_published: !currentlyPublished })
+        });
+        const data = await res.json();
+        if (data.success) {
+            const np = data.is_published;
+            btn.style.background = np ? '#dcfce7' : '#f1f5f9';
+            btn.style.color      = np ? '#15803d' : '#64748b';
+            btn.innerHTML = `<i class="fas fa-${np?'eye':'eye-slash'}"></i> ${np?'Publié':'Masqué'}`;
+            btn.title = np ? 'Cliquer pour masquer' : 'Cliquer pour publier';
+        } else {
+            showAlert(data.error || 'Erreur', 'error');
+        }
+    } catch { showAlert('Impossible de modifier la publication.', 'error'); }
+}
+
 async function downloadTranscriptPDF(transcriptId) {
     showLoader(true);
 
@@ -11322,13 +11720,41 @@ function _showGeneratedExamPreview(title, content, rubric, ecId) {
                 <button class="btn btn-secondary" onclick="closeModal(); showCreateCourseWithAISuggestionsModal();">
                     <i class="fas fa-arrow-left"></i> Retour aux suggestions
                 </button>
-                <button class="btn btn-primary" id="btn-confirm-save-subject" onclick="_confirmSaveGeneratedSubject(document.getElementById('preview-content-edit').value, document.getElementById('preview-rubric-edit').value, ${JSON.stringify(ecId || '').replace(/"/g, '&quot;')})">
+                <!-- #9 — ajouter au panier -->
+                <button class="btn" onclick="_addVersionToBasket(document.getElementById('preview-content-edit').value, document.getElementById('preview-rubric-edit').value)"
+                    style="background:#f0fdf4;border:1px solid #bbf7d0;color:#15803d;position:relative;">
+                    <i class="fas fa-shopping-basket"></i> Panier
+                    <span id="ai-basket-badge" style="display:none;position:absolute;top:-6px;right:-6px;background:#ef4444;color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;font-weight:700;align-items:center;justify-content:center;"></span>
+                </button>
+                <!-- #9 — comparer les versions -->
+                <button class="btn" onclick="_showBasketComparison()" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;">
+                    <i class="fas fa-columns"></i> Comparer
+                </button>
+                <!-- #4 — sauvegarder dans la banque -->
+                <button class="btn" onclick="saveToBankFromPreview()" style="background:#fdf4ff;border:1px solid #e9d5ff;color:#7c3aed;">
+                    <i class="fas fa-database"></i> Banque
+                </button>
+                <button class="btn btn-primary" id="btn-confirm-save-subject" onclick="_confirmSaveGeneratedSubjectChecked()">
                     <i class="fas fa-save"></i> Enregistrer ce Sujet
                 </button>
             </div>
         </div>
     `;
     showModal(previewContent, '850px');
+}
+
+// #10 — wrapper avec vérification de doublons
+async function _confirmSaveGeneratedSubjectChecked() {
+    const content = document.getElementById('preview-content-edit')?.value || '';
+    const rubric  = document.getElementById('preview-rubric-edit')?.value || '';
+    const ecId    = document.getElementById('ai-ec-id')?.value || '';
+    const { duplicate, title: dupTitle } = await _checkSubjectDuplicate(content);
+    if (duplicate) {
+        const ok = confirm(`⚠️ Ce sujet ressemble fortement à "${dupTitle}" déjà enregistré.\n\nVoulez-vous quand même l'enregistrer ?`);
+        if (!ok) return;
+    }
+    _allSubjectCache = null; // invalider le cache après sauvegarde
+    _confirmSaveGeneratedSubject(content, rubric, ecId);
 }
 
 async function _confirmSaveGeneratedSubject(content, rubric, ecId) {
