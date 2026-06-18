@@ -2873,6 +2873,25 @@ def get_reclamations():
 
         if user.role == UserRole.STUDENT:
             reclamations = query.filter_by(student_id=user_id).order_by(desc(Reclamation.created_at)).all()
+        elif user.role == UserRole.PROFESSOR:
+            # Un prof ne voit que les réclamations qui le concernent :
+            # - copies papier qu'il a lui-même corrigées (corrected_by_id)
+            # - examens en ligne qu'il a créés (created_by_id)
+            paper_reclamation_ids = [
+                r.id for r in session.query(Reclamation)
+                .join(StudentPaper, Reclamation.paper_id == StudentPaper.id)
+                .filter(StudentPaper.corrected_by_id == user_id)
+                .all()
+            ]
+            online_reclamation_ids = [
+                r.id for r in session.query(Reclamation)
+                .join(ExamAttempt, Reclamation.attempt_id == ExamAttempt.id)
+                .join(OnlineExam, ExamAttempt.exam_id == OnlineExam.id)
+                .filter(OnlineExam.created_by_id == user_id)
+                .all()
+            ]
+            visible_ids = list(set(paper_reclamation_ids + online_reclamation_ids))
+            reclamations = query.filter(Reclamation.id.in_(visible_ids)).order_by(desc(Reclamation.created_at)).all() if visible_ids else []
         else:
             reclamations = query.order_by(desc(Reclamation.created_at)).all()
 
