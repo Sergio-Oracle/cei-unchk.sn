@@ -491,6 +491,10 @@
             <i class="fas fa-ban"></i>
             <span id="stat-banned">0</span> bannis
         </div>
+        <div class="stat-pill" title="Étudiants sous surveillance">
+            <i class="fas fa-users"></i>
+            <span id="stat-ratio">—</span>
+        </div>
         <div class="stat-pill" id="stat-messages-pill" style="background:rgba(37,99,235,.3);cursor:pointer;" onclick="openStudentMessages()" title="Messages des étudiants">
             <i class="fas fa-comment-dots"></i>
             <span id="stat-messages">0</span> message(s)
@@ -787,6 +791,7 @@
 
     <!-- Grille des étudiants actifs -->
     <div class="students-grid" id="students-grid"></div>
+    <div id="grid-pagination" style="display:flex;align-items:center;justify-content:center;gap:12px;padding:16px 0;"></div>
 
     <!-- Panneau Terminés (soumis / auto-soumis) -->
     <div id="completed-panel" style="display:none;">
@@ -995,6 +1000,8 @@ let proctorsData  = [];        // liste des surveillants (pour vue enseignant)
 let myRole        = null;      // 'professor'|'admin'|'surveillant'
 let myIdentity    = null;      // ex. 'proctor-42' ou 'teacher-7'
 let currentFilter = 'IN_PROGRESS';
+const CARDS_PER_PAGE = 12;
+let gridPage = 1;
 let selectedAttemptId = null;
 let sendType = 'warning'; // 'warning' ou 'message'
 let banAttemptId = null;
@@ -1480,10 +1487,16 @@ function updateStats() {
     const highRisk  = studentsData.filter(s => s.risk_score >= 70).length;
     const banned    = studentsData.filter(s => s.banned).length;
     const submitted = studentsData.filter(s => ['submitted','auto_submitted'].includes(s.status)).length;
+    const total     = studentsData.length;
 
     document.getElementById('stat-active').textContent   = active;
     document.getElementById('stat-highrisk').textContent = highRisk;
     document.getElementById('stat-banned').textContent   = banned;
+
+    // Supervision ratio
+    const ratio = total > 0 ? total : 0;
+    const ratioEl = document.getElementById('stat-ratio');
+    if (ratioEl) ratioEl.textContent = ratio + ' étud.';
 
     // Stats enseignant (header pills)
     const subEl = document.getElementById('stat-submitted');
@@ -1514,10 +1527,17 @@ function renderGrid() {
         return true;
     });
 
+    // Sort: high risk first, then by status order
+    const statusOrder = {'in_progress':0,'submitted':1,'auto_submitted':2,'banned':3};
+    filtered.sort((a, b) =>
+        (b.risk_score||0) - (a.risk_score||0) ||
+        (statusOrder[a.status]||99) - (statusOrder[b.status]||99)
+    );
+
     if (filtered.length === 0) {
-        const search = (document.getElementById('search-input').value || '').trim();
+        const searchVal = (document.getElementById('search-input').value || '').trim();
         let icon = 'fa-users-slash', msg = 'Aucun étudiant correspondant';
-        if (!search) {
+        if (!searchVal) {
             if (currentFilter === 'IN_PROGRESS') {
                 const doneCount = studentsData.filter(s => ['submitted','auto_submitted'].includes(s.status)).length;
                 const bannedCount = studentsData.filter(s => s.status === 'banned').length;
@@ -1540,19 +1560,26 @@ function renderGrid() {
             }
         }
         grid.innerHTML = `<div class="empty-grid"><i class="fas ${icon}"></i><p>${msg}</p></div>`;
+        // Hide pagination
+        const paginationEl = document.getElementById('grid-pagination');
+        if (paginationEl) paginationEl.innerHTML = '';
         return;
     }
 
-    // Mettre à jour les cartes existantes ou en créer de nouvelles
-    const existingIds = new Set([...grid.querySelectorAll('.student-card')].map(el => el.dataset.attemptId));
-    const newIds = new Set(filtered.map(s => String(s.attempt_id)));
+    // Pagination
+    const totalPages = Math.ceil(filtered.length / CARDS_PER_PAGE);
+    if (gridPage > totalPages) gridPage = Math.max(1, totalPages);
+    const paginated = filtered.slice((gridPage - 1) * CARDS_PER_PAGE, gridPage * CARDS_PER_PAGE);
 
-    // Supprimer les cartes qui ne sont plus dans le filtre
+    // Mettre à jour les cartes existantes ou en créer de nouvelles
+    const newIds = new Set(paginated.map(s => String(s.attempt_id)));
+
+    // Supprimer les cartes qui ne sont plus dans la page courante
     grid.querySelectorAll('.student-card').forEach(el => {
         if (!newIds.has(el.dataset.attemptId)) el.remove();
     });
 
-    filtered.forEach(student => {
+    paginated.forEach(student => {
         const existingCard = grid.querySelector(`[data-attempt-id="${student.attempt_id}"]`);
         if (existingCard) {
             updateCard(existingCard, student);
@@ -1563,6 +1590,21 @@ function renderGrid() {
             attachVideoToCard(student.livekit_identity, student.attempt_id);
         }
     });
+
+    // Pagination bar
+    const paginationEl = document.getElementById('grid-pagination');
+    if (paginationEl) {
+        if (totalPages > 1) {
+            const prevDisabled = gridPage === 1 ? 'disabled style="opacity:.4;cursor:default;"' : '';
+            const nextDisabled = gridPage === totalPages ? 'disabled style="opacity:.4;cursor:default;"' : '';
+            paginationEl.innerHTML =
+                `<button class="btn btn-light btn-sm" onclick="gridPage=Math.max(1,gridPage-1);renderGrid()" ${prevDisabled}>← Précédente</button>` +
+                `<span style="font-size:13px;font-weight:600;">Page ${gridPage} / ${totalPages}</span>` +
+                `<button class="btn btn-light btn-sm" onclick="gridPage=Math.min(${totalPages},gridPage+1);renderGrid()" ${nextDisabled}>Suivante →</button>`;
+        } else {
+            paginationEl.innerHTML = '';
+        }
+    }
 }
 
 function getRiskClass(score) {

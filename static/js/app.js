@@ -402,7 +402,19 @@ function showApp() {
     refreshNavbarAvatar();
     loadNavigation();
     initSidebar();
-    loadDashboard();
+
+    // #13 — restaurer la dernière vue pour les étudiants
+    const _lastStudentView = sessionStorage.getItem('_cei_student_view');
+    const _studentViewMap = {
+        loadOnlineExams, loadMyTranscripts, loadExamSchedule,
+        loadMyReclamations, loadStudentHelp
+    };
+    if (currentUser && currentUser.role === 'student' &&
+        _lastStudentView && _studentViewMap[_lastStudentView]) {
+        _studentViewMap[_lastStudentView]();
+    } else {
+        loadDashboard();
+    }
     startNotifPolling();
     // Rechargement complet quand la langue change
     const _origSetLang = window.setLang;
@@ -484,6 +496,15 @@ function initSidebar() {
         // Close mobile sidebar when a tab is clicked
         btn.addEventListener('click', () => { if (_isMobile()) closeSidebarMobile(); }, { once: false });
     });
+
+    // #11 — indicateur de défilement (gradient en bas)
+    setTimeout(() => {
+        sidebar.classList.toggle('has-overflow', sidebar.scrollHeight > sidebar.clientHeight + 4);
+        sidebar.addEventListener('scroll', () => {
+            const atBottom = sidebar.scrollTop + sidebar.clientHeight >= sidebar.scrollHeight - 8;
+            sidebar.classList.toggle('has-overflow', !atBottom && sidebar.scrollHeight > sidebar.clientHeight + 4);
+        }, { passive: true });
+    }, 100);
 }
 
 function toggleSidebar() {
@@ -662,20 +683,9 @@ function loadNavigation() {
             <button class="nav-tab active" onclick="loadDashboard()">
                 <i class="fas fa-chart-line"></i> ${t('nav.dashboard')}
             </button>
-            <button class="nav-tab" onclick="showCreateCourseWithAISuggestionsModal()">
-                <i class="fas fa-magic"></i> ${t('nav.ai_suggestions')}
-            </button>
-            <button class="nav-tab" onclick="loadCreateSubject()">
-                <i class="fas fa-plus-circle"></i> ${t('nav.create_subject')}
-            </button>
+            <div class="nav-divider">Gestion</div>
             <button class="nav-tab" onclick="loadUsers()">
                 <i class="fas fa-users"></i> ${t('nav.users')}
-            </button>
-            <button class="nav-tab" onclick="loadSubjects()">
-                <i class="fas fa-file-alt"></i> ${t('nav.subjects')}
-            </button>
-            <button class="nav-tab" onclick="loadCorrectedPapersList()">
-                <i class="fas fa-check-circle"></i> ${t('nav.corrected_papers')}
             </button>
             <button class="nav-tab" onclick="loadMaquette()">
                 <i class="fas fa-layer-group"></i> ${t('nav.maquette')}
@@ -686,6 +696,16 @@ function loadNavigation() {
             <button class="nav-tab" onclick="loadStudentEnrollments()">
                 <i class="fas fa-user-graduate"></i> ${t('nav.ue_enrollments')}
             </button>
+            <div class="nav-divider">Sujets &amp; Examens</div>
+            <button class="nav-tab" onclick="showCreateCourseWithAISuggestionsModal()">
+                <i class="fas fa-magic"></i> ${t('nav.ai_suggestions')}
+            </button>
+            <button class="nav-tab" onclick="loadCreateSubject()">
+                <i class="fas fa-plus-circle"></i> ${t('nav.create_subject')}
+            </button>
+            <button class="nav-tab" onclick="loadSubjects()">
+                <i class="fas fa-file-alt"></i> ${t('nav.subjects')}
+            </button>
             <button class="nav-tab" onclick="loadOnlineExams()">
                 <i class="fas fa-laptop-code"></i> ${t('nav.online_exams')}
             </button>
@@ -695,8 +715,9 @@ function loadNavigation() {
             <button class="nav-tab" onclick="loadExamCalendar()">
                 <i class="fas fa-calendar-alt"></i> Calendrier
             </button>
-            <button class="nav-tab" onclick="loadProfessorAnalytics()">
-                <i class="fas fa-chart-line"></i> Analytique
+            <div class="nav-divider">Évaluations</div>
+            <button class="nav-tab" onclick="loadCorrectedPapersList()">
+                <i class="fas fa-check-circle"></i> ${t('nav.corrected_papers')}
             </button>
             <button class="nav-tab" onclick="loadTranscripts()">
                 <i class="fas fa-file-alt"></i> ${t('nav.transcripts')}
@@ -704,29 +725,29 @@ function loadNavigation() {
             <button class="nav-tab" onclick="loadReclamations()">
                 <i class="fas fa-exclamation-triangle"></i> ${t('nav.reclamations')}
             </button>
+            <div class="nav-divider">Administration</div>
+            <button class="nav-tab" onclick="loadProfessorAnalytics()">
+                <i class="fas fa-chart-bar"></i> Analytique
+            </button>
             <button class="nav-tab" onclick="loadSecurityReport()">
                 <i class="fas fa-shield-alt"></i> Sécurité
             </button>
             <button class="nav-tab" onclick="toggleTheme()" id="theme-toggle-btn" title="${t('nav.change_theme')}">
                 <i class="fas fa-moon"></i>
             </button>
+            <div class="sidebar-scroll-fade"></div>
         </div>`;
     } else if (currentUser.role === 'professor') {
     tabs = `<div class="nav-tabs">
         <button class="nav-tab active" onclick="loadDashboard()">
             <i class="fas fa-chart-line"></i> ${t('nav.dashboard')}
         </button>
+        <div class="nav-divider">Sujets &amp; Examens</div>
         <button class="nav-tab" onclick="showCreateCourseWithAISuggestionsModal()">
             <i class="fas fa-magic"></i> ${t('nav.ai_suggestions')}
         </button>
         <button class="nav-tab" onclick="loadCreateSubject()">
             <i class="fas fa-plus-circle"></i> ${t('nav.create_subject')}
-        </button>
-        <button class="nav-tab" onclick="loadCorrectPapers()">
-            <i class="fas fa-pencil-alt"></i> ${t('nav.correct_papers')}
-        </button>
-        <button class="nav-tab" onclick="loadCorrectedPapersList()">
-            <i class="fas fa-check-circle"></i> ${t('nav.corrected_papers')}
         </button>
         <button class="nav-tab" onclick="loadMySubjects()">
             <i class="fas fa-book"></i> ${t('nav.my_subjects')}
@@ -734,9 +755,17 @@ function loadNavigation() {
         <button class="nav-tab" onclick="loadOnlineExams()">
             <i class="fas fa-laptop-code"></i> ${t('nav.online_exams')}
         </button>
+        <div class="nav-divider">Corrections</div>
+        <button class="nav-tab" onclick="loadCorrectPapers()">
+            <i class="fas fa-pencil-alt"></i> ${t('nav.correct_papers')}
+        </button>
+        <button class="nav-tab" onclick="loadCorrectedPapersList()">
+            <i class="fas fa-check-circle"></i> ${t('nav.corrected_papers')}
+        </button>
         <button class="nav-tab" onclick="loadExamCorrections()">
             <i class="fas fa-check-circle"></i> ${t('nav.correct_online')}
         </button>
+        <div class="nav-divider">Résultats</div>
         <button class="nav-tab" onclick="loadViewResults()">
             <i class="fas fa-chart-bar"></i> ${t('nav.results')}
         </button>
@@ -756,6 +785,7 @@ function loadNavigation() {
         <button class="nav-tab" onclick="toggleTheme()" id="theme-toggle-btn" title="${t('nav.change_theme')}">
             <i class="fas fa-moon"></i>
         </button>
+        <div class="sidebar-scroll-fade"></div>
     </div>`;
 
     } else if (currentUser.role === 'surveillant') {
@@ -3527,6 +3557,7 @@ function loadMyReclamations() {
 async function loadMyTranscripts() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
     window._currentView = loadMyTranscripts;
+    sessionStorage.setItem('_cei_student_view', 'loadMyTranscripts');
     showLoader(true);
     try {
         const res = await authenticatedFetch('/api/student/transcripts');
@@ -3758,6 +3789,7 @@ async function deleteTranscript(transcriptId) {
 async function loadExamSchedule() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
     window._currentView = loadExamSchedule;
+    sessionStorage.setItem('_cei_student_view', 'loadExamSchedule');
     showLoader(true);
     try {
         const res = await authenticatedFetch('/api/online_exams');
@@ -3865,6 +3897,7 @@ async function loadExamSchedule() {
 function loadStudentHelp() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
     window._currentView = loadStudentHelp;
+    sessionStorage.setItem('_cei_student_view', 'loadStudentHelp');
     const faq = [
         {
             q: 'Pourquoi est-ce que je vois des avertissements pendant l\'examen ?',
@@ -5946,6 +5979,7 @@ async function loadOnlineExams() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
     if (window._onlineExamsTimer) { clearTimeout(window._onlineExamsTimer); window._onlineExamsTimer = null; }
     window._currentView = loadOnlineExams;
+    if (currentUser && currentUser.role === 'student') sessionStorage.setItem('_cei_student_view', 'loadOnlineExams');
     showLoader(true);
 
     try {
@@ -6115,6 +6149,7 @@ async function loadOnlineExams() {
                     if (exam.status === 'scheduled' || exam.status === 'draft') {
                         actionsHTML += `<button class="btn btn-sm btn-success" onclick="activateExam(${exam.id})" title="Activer" style="flex:1;"><i class="fas fa-play-circle"></i> Activer</button>`;
                         actionsHTML += `<button class="btn btn-sm" onclick="extendExam(${exam.id})" title="Rallonger la durée" style="background:rgba(16,185,129,.1);color:#059669;flex:1;"><i class="fas fa-clock"></i> Rallonger</button>`;
+                        actionsHTML += `<button class="btn btn-sm" onclick="editExamDetails(${exam.id})" title="Modifier titre/date/durée" style="background:rgba(59,130,246,.1);color:#3b82f6;flex:1;"><i class="fas fa-pencil-alt"></i> Éditer</button>`;
                     }
                     actionsHTML += `<button class="btn btn-sm" onclick="deleteOnlineExam(${exam.id}, '${safeTitle}', ${exam.attempts_count || 0})" title="Supprimer" style="background:rgba(239,68,68,.1);color:#ef4444;padding:8px 12px;flex-shrink:0;"><i class="fas fa-trash"></i></button>`;
                 }
@@ -6243,9 +6278,69 @@ async function confirmDeleteOnlineExam(examId) {
     }
 }
 
+// #6 — Édition d'un examen existant (titre, date, durée)
+async function editExamDetails(examId) {
+    const res = await authenticatedFetch(`/api/online_exams/${examId}`);
+    if (!res.ok) { showAlert('Impossible de récupérer les détails de l\'examen.', 'error'); return; }
+    const exam = await res.json();
+
+    const startIso = exam.start_time ? exam.start_time.replace(' ', 'T').substring(0, 16) : '';
+    showModal(`
+        <div style="padding:4px 0;">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+                <div style="width:44px;height:44px;background:rgba(59,130,246,.1);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <i class="fas fa-pencil-alt" style="color:#3b82f6;font-size:18px;"></i>
+                </div>
+                <div>
+                    <h3 style="margin:0;font-size:18px;font-weight:700;color:#0f172a;">Modifier l'examen</h3>
+                    <p style="margin:2px 0 0;font-size:13px;color:#64748b;">Titre, date de début et durée</p>
+                </div>
+            </div>
+            <div class="form-group" style="margin-bottom:14px;">
+                <label class="form-label"><i class="fas fa-heading"></i> Titre de l'examen</label>
+                <input id="edit-exam-title" class="form-input" type="text" value="${(exam.title||'').replace(/"/g,'&quot;')}" placeholder="Titre de l'examen">
+            </div>
+            <div class="form-group" style="margin-bottom:14px;">
+                <label class="form-label"><i class="fas fa-calendar-alt"></i> Date et heure de début</label>
+                <input id="edit-exam-start" class="form-input" type="datetime-local" value="${startIso}">
+            </div>
+            <div class="form-group" style="margin-bottom:20px;">
+                <label class="form-label"><i class="fas fa-clock"></i> Durée (minutes)</label>
+                <input id="edit-exam-duration" class="form-input" type="number" min="5" max="480" value="${exam.duration_minutes || 60}">
+            </div>
+            <div style="display:flex;gap:12px;justify-content:flex-end;">
+                <button class="btn btn-secondary" onclick="closeModal()"><i class="fas fa-times"></i> Annuler</button>
+                <button class="btn btn-primary" id="btn-save-exam-edit" onclick="saveExamEdits(${examId})">
+                    <i class="fas fa-save"></i> Enregistrer
+                </button>
+            </div>
+        </div>
+    `, '480px');
+}
+
+async function saveExamEdits(examId) {
+    const btn = document.getElementById('btn-save-exam-edit');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sauvegarde...'; }
+    const title    = document.getElementById('edit-exam-title').value.trim();
+    const start    = document.getElementById('edit-exam-start').value;
+    const duration = parseInt(document.getElementById('edit-exam-duration').value, 10);
+    if (!title) { showAlert('Le titre est obligatoire.', 'error'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> Enregistrer'; } return; }
+    try {
+        const res = await authenticatedFetch(`/api/admin/online_exams/${examId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, start_time: start || null, duration_minutes: duration || 60 })
+        });
+        const data = await res.json();
+        closeModal();
+        if (data.success) { showAlert('Examen mis à jour avec succès.', 'success'); loadOnlineExams(); }
+        else showAlert(data.error || 'Erreur lors de la mise à jour.', 'error');
+    } catch { closeModal(); }
+}
+
 async function showCreateOnlineExamModal() {
     showLoader(true);
-   
+
     try {
         // Récupérer les sujets
         const subjectsResponse = await authenticatedFetch('/api/subjects');
@@ -6987,6 +7082,47 @@ function _parseExamBlocks(raw) {
     return blocks;
 }
 
+// #22 — index de la question courante (navigation QCM)
+let _examQIndex = 0;
+
+function _gotoExamQuestion(idx) {
+    const qblocks = document.querySelectorAll('.exam-q-block');
+    if (!qblocks.length) return;
+    _examQIndex = Math.max(0, Math.min(idx, qblocks.length - 1));
+    qblocks.forEach((b, i) => b.style.display = i === _examQIndex ? 'block' : 'none');
+    _updateExamNavUI();
+}
+
+function _updateExamNavUI() {
+    const qblocks = document.querySelectorAll('.exam-q-block');
+    const total = qblocks.length;
+    if (!total) return;
+    const prevBtn = document.getElementById('exam-nav-prev');
+    const nextBtn = document.getElementById('exam-nav-next');
+    const counter = document.getElementById('exam-nav-counter');
+    const mapEl   = document.getElementById('exam-q-map');
+    if (prevBtn) prevBtn.disabled = _examQIndex === 0;
+    if (nextBtn) nextBtn.disabled = _examQIndex === total - 1;
+    if (counter) counter.textContent = `Question ${_examQIndex + 1} / ${total}`;
+    // Mise à jour de la carte des questions
+    if (mapEl) {
+        [...mapEl.children].forEach((dot, i) => {
+            const qNum  = qblocks[i] ? qblocks[i].dataset.qnum : null;
+            const type  = qblocks[i] ? qblocks[i].dataset.type : null;
+            let answered = false;
+            if (type === 'qcm' && qNum) {
+                answered = !!document.querySelector(`input[name="qcm_q${qNum}"]:checked`);
+            } else if (qNum) {
+                const ta = document.getElementById(`open-q-${qNum}`);
+                answered = ta && ta.value.trim().length > 0;
+            }
+            dot.style.background = i === _examQIndex ? '#3b82f6' : answered ? '#10b981' : 'rgba(255,255,255,.25)';
+            dot.title = `Q${i + 1}`;
+        });
+    }
+    _updateExamProgress();
+}
+
 function _renderExamAnswerSection(blocks, savedData) {
     const qcmData   = (savedData && savedData.qcm)   || {};
     const texteData = (savedData && savedData.texte)  || {};
@@ -7096,7 +7232,54 @@ function _renderExamAnswerSection(blocks, savedData) {
         qHtml += `</div>`;
     });
 
-    return legend + progress + qHtml;
+    // Navigation question par question (#22) — uniquement si plusieurs questions
+    if (questions.length <= 1) {
+        return legend + progress + qHtml;
+    }
+
+    // Carte des questions (pastilles)
+    const mapDots = questions.map((_, i) =>
+        `<span onclick="_gotoExamQuestion(${i})" title="Q${i+1}" style="
+            width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.25);
+            display:inline-flex;align-items:center;justify-content:center;
+            font-size:10px;font-weight:700;color:#fff;cursor:pointer;
+            border:1.5px solid rgba(255,255,255,.4);transition:background .15s;
+            flex-shrink:0;" id="qmap-dot-${i}">${i+1}</span>`
+    ).join('');
+
+    const navBar = `
+        <div style="background:#1e293b;border-radius:12px;padding:12px 16px;margin-bottom:16px;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+                <button id="exam-nav-prev" onclick="_gotoExamQuestion(_examQIndex-1)"
+                    style="background:rgba(255,255,255,.1);border:none;color:#fff;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;transition:background .15s;"
+                    onmouseover="this.style.background='rgba(255,255,255,.2)'" onmouseout="this.style.background='rgba(255,255,255,.1)'">
+                    <i class="fas fa-chevron-left"></i> Précédente
+                </button>
+                <span id="exam-nav-counter" style="flex:1;text-align:center;font-size:14px;font-weight:700;color:#f1f5f9;">
+                    Question 1 / ${questions.length}
+                </span>
+                <button id="exam-nav-next" onclick="_gotoExamQuestion(_examQIndex+1)"
+                    style="background:#3b82f6;border:none;color:#fff;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;transition:background .15s;"
+                    onmouseover="this.style.background='#2563eb'" onmouseout="this.style.background='#3b82f6'">
+                    Suivante <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+            <div id="exam-q-map" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;">
+                ${mapDots}
+            </div>
+            <div style="margin-top:8px;font-size:11px;color:rgba(255,255,255,.4);text-align:center;">
+                <span style="display:inline-flex;align-items:center;gap:4px;">
+                    <span style="width:10px;height:10px;border-radius:50%;background:#10b981;display:inline-block;"></span> Répondu
+                    <span style="width:10px;height:10px;border-radius:50%;background:#3b82f6;display:inline-block;margin-left:8px;"></span> Question actuelle
+                </span>
+            </div>
+        </div>`;
+
+    // Cacher toutes les questions sauf la première (géré par _gotoExamQuestion au chargement)
+    const hiddenQHtml = qHtml.replace(/class="exam-q-block"/g,
+        'class="exam-q-block" style="display:none"');
+
+    return legend + progress + navBar + hiddenQHtml;
 }
 
 // Sélection d'une option QCM
@@ -7111,6 +7294,7 @@ function _onQCMSelect(qNum, letter) {
     const qBlock = document.getElementById(`qblock-${qNum}`);
     if (qBlock) qBlock.style.borderColor = '#3b82f6';
     _updateExamProgress();
+    _updateExamNavUI();
     _syncExamAnswers();
 }
 
@@ -7120,6 +7304,7 @@ function _onOpenInput(textarea) {
     const qBlock = document.getElementById(`qblock-${qNum}`);
     if (qBlock) qBlock.style.borderColor = textarea.value.trim() ? '#10b981' : '#e2e8f0';
     _updateExamProgress();
+    _updateExamNavUI();
     _syncExamAnswers();
 }
 
@@ -7632,7 +7817,9 @@ async function showExamCompositionInterface(examId, attempt) {
     
     document.getElementById('main-content').innerHTML = html;
 
-    // Initialiser barre de progression et champ caché
+    // Initialiser navigation QCM, barre de progression et champ caché
+    _examQIndex = 0;
+    _gotoExamQuestion(0);   // affiche Q1, cache les autres, met à jour la carte
     _updateExamProgress();
     _syncExamAnswers();
 
@@ -10259,6 +10446,40 @@ async function showCreateCourseWithAISuggestionsModal() {
                             </div>
                         </div>
 
+                        <!-- #5 — Types de questions -->
+                        <div class="form-group">
+                            <label class="form-label">
+                                <i class="fas fa-list-check"></i> Types de questions à inclure
+                            </label>
+                            <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px;">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;">
+                                    <input type="checkbox" id="ai-type-qcm" checked style="accent-color:#3b82f6;width:16px;height:16px;"> QCM
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;">
+                                    <input type="checkbox" id="ai-type-open" checked style="accent-color:#3b82f6;width:16px;height:16px;"> Questions ouvertes
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;">
+                                    <input type="checkbox" id="ai-type-vf" style="accent-color:#3b82f6;width:16px;height:16px;"> Vrai / Faux
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- #5 — Niveaux de Bloom -->
+                        <div class="form-group">
+                            <label class="form-label">
+                                <i class="fas fa-brain"></i> Niveaux taxonomiques de Bloom visés
+                            </label>
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;">
+                                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;"><input type="checkbox" id="ai-bloom-connaissance" style="accent-color:#8b5cf6;width:15px;height:15px;"> Connaissance</label>
+                                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;"><input type="checkbox" id="ai-bloom-comprehension" style="accent-color:#8b5cf6;width:15px;height:15px;"> Compréhension</label>
+                                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;"><input type="checkbox" id="ai-bloom-application" checked style="accent-color:#8b5cf6;width:15px;height:15px;"> Application</label>
+                                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;"><input type="checkbox" id="ai-bloom-analyse" checked style="accent-color:#8b5cf6;width:15px;height:15px;"> Analyse</label>
+                                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;"><input type="checkbox" id="ai-bloom-synthese" style="accent-color:#8b5cf6;width:15px;height:15px;"> Synthèse</label>
+                                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;"><input type="checkbox" id="ai-bloom-evaluation" style="accent-color:#8b5cf6;width:15px;height:15px;"> Évaluation</label>
+                            </div>
+                            <small class="form-help" style="margin-top:4px;"><i class="fas fa-info-circle"></i> Niveaux cognitifs à cibler dans la génération</small>
+                        </div>
+
                         <div class="form-group">
                             <label class="form-label">
                                 <i class="fas fa-layer-group"></i> Élément Constitutif (EC)
@@ -10863,7 +11084,21 @@ async function handleAIFormSubmit(e) {
         formData.append('course_file', file);
         formData.append('difficulty', document.getElementById('ai-difficulty').value);
         formData.append('student_level', document.getElementById('ai-student-level').value);
-        
+
+        // #5 — types de questions
+        const qTypes = ['qcm','open','vf'].filter(t => {
+            const el = document.getElementById(`ai-type-${t}`);
+            return el && el.checked;
+        }).map(t => t === 'qcm' ? 'QCM' : t === 'open' ? 'Questions ouvertes' : 'Vrai/Faux');
+        if (qTypes.length) formData.append('question_types', qTypes.join(','));
+
+        // #5 — niveaux Bloom
+        const bloomLevels = ['connaissance','comprehension','application','analyse','synthese','evaluation'].filter(l => {
+            const el = document.getElementById(`ai-bloom-${l}`);
+            return el && el.checked;
+        });
+        if (bloomLevels.length) formData.append('bloom_levels', bloomLevels.join(','));
+
         // Récupérer EC si sélectionné
         const ecId = document.getElementById('ai-ec-id').value;
         if (ecId) {
@@ -11048,28 +11283,34 @@ function _showGeneratedExamPreview(title, content, rubric, ecId) {
                 <p style="margin:0;color:#64748b;font-size:14px;">L'IA a créé un sujet complet avec questions et barème de notation</p>
             </div>
 
-            <!-- Sujet / Questions -->
+            <!-- Sujet / Questions — éditable (#8) -->
             <div style="margin-bottom:16px;">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
                     <i class="fas fa-file-lines" style="color:#3b82f6;"></i>
                     <strong style="color:#0f172a;">Sujet d'Examen &amp; Questions</strong>
                     <span style="margin-left:auto;background:#eff6ff;color:#3b82f6;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;">
-                        <i class="fas fa-robot"></i> Généré par IA
+                        <i class="fas fa-robot"></i> Généré par IA — modifiable
                     </span>
                 </div>
-                <div style="max-height:300px;overflow-y:auto;padding:14px;background:#f8fafc;border-radius:8px;font-family:monospace;font-size:13px;line-height:1.7;white-space:pre-wrap;border:1px solid #e2e8f0;">${content}</div>
+                <textarea id="preview-content-edit" rows="12"
+                    style="width:100%;padding:14px;background:#f8fafc;border-radius:8px;font-family:monospace;font-size:13px;line-height:1.7;border:1px solid #e2e8f0;resize:vertical;box-sizing:border-box;outline:none;"
+                    onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'"
+                >${content}</textarea>
             </div>
 
-            <!-- Barème -->
+            <!-- Barème — éditable -->
             <div style="margin-bottom:20px;">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
                     <i class="fas fa-clipboard-list" style="color:#10b981;"></i>
                     <strong style="color:#0f172a;">Barème de Notation</strong>
                     <span style="margin-left:auto;background:#f0fdf4;color:#15803d;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;">
-                        <i class="fas fa-check"></i> Points attribués
+                        <i class="fas fa-pencil-alt"></i> Modifiable
                     </span>
                 </div>
-                <div style="max-height:280px;overflow-y:auto;padding:14px;background:#f0fdf4;border-radius:8px;font-family:monospace;font-size:13px;line-height:1.8;white-space:pre-wrap;border:1px solid #bbf7d0;">${rubric}</div>
+                <textarea id="preview-rubric-edit" rows="8"
+                    style="width:100%;padding:14px;background:#f0fdf4;border-radius:8px;font-family:monospace;font-size:13px;line-height:1.8;border:1px solid #bbf7d0;resize:vertical;box-sizing:border-box;outline:none;"
+                    onfocus="this.style.borderColor='#10b981'" onblur="this.style.borderColor='#bbf7d0'"
+                >${rubric}</textarea>
             </div>
 
             <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:12px;margin-bottom:20px;font-size:13px;color:#92400e;">
@@ -11081,7 +11322,7 @@ function _showGeneratedExamPreview(title, content, rubric, ecId) {
                 <button class="btn btn-secondary" onclick="closeModal(); showCreateCourseWithAISuggestionsModal();">
                     <i class="fas fa-arrow-left"></i> Retour aux suggestions
                 </button>
-                <button class="btn btn-primary" id="btn-confirm-save-subject" onclick="_confirmSaveGeneratedSubject(${JSON.stringify(title).replace(/"/g, '&quot;')}, ${JSON.stringify(content).replace(/"/g, '&quot;')}, ${JSON.stringify(rubric).replace(/"/g, '&quot;')}, ${JSON.stringify(ecId || '').replace(/"/g, '&quot;')})">
+                <button class="btn btn-primary" id="btn-confirm-save-subject" onclick="_confirmSaveGeneratedSubject(document.getElementById('preview-content-edit').value, document.getElementById('preview-rubric-edit').value, ${JSON.stringify(ecId || '').replace(/"/g, '&quot;')})">
                     <i class="fas fa-save"></i> Enregistrer ce Sujet
                 </button>
             </div>
@@ -11090,7 +11331,9 @@ function _showGeneratedExamPreview(title, content, rubric, ecId) {
     showModal(previewContent, '850px');
 }
 
-async function _confirmSaveGeneratedSubject(title, content, rubric, ecId) {
+async function _confirmSaveGeneratedSubject(content, rubric, ecId) {
+    // content et rubric viennent des textareas éditables
+    const title = (content.split('\n')[0] || 'Sujet généré par IA').replace(/^#+\s*/, '').substring(0, 100);
     const btn = document.getElementById('btn-confirm-save-subject');
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Enregistrement...'; }
 

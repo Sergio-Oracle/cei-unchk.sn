@@ -457,6 +457,32 @@ body {
     align-items: center;
 }
 
+/* ── Séparateurs de section dans la nav ── */
+.nav-divider {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #94a3b8;
+    padding: 10px 14px 3px;
+    white-space: nowrap;
+    user-select: none;
+}
+.sidebar.collapsed .nav-divider { display: none; }
+
+/* Indicateur de défilement (gradient en bas de la sidebar) */
+.sidebar-scroll-fade {
+    position: sticky;
+    bottom: 0;
+    height: 32px;
+    background: linear-gradient(transparent, white);
+    pointer-events: none;
+    flex-shrink: 0;
+    display: none;
+}
+.sidebar.has-overflow .sidebar-scroll-fade { display: block; }
+.theme-dark .sidebar-scroll-fade { background: linear-gradient(transparent, #1e293b); }
+
 /* ============================================================================
    MAIN CONTENT
    ============================================================================ */

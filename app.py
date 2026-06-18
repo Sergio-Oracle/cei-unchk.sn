@@ -3775,6 +3775,50 @@ def close_online_exam(exam_id):
         print(f"❌ Erreur close_online_exam: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/admin/online_exams/<int:exam_id>', methods=['PUT'])
+@jwt_required()
+def edit_online_exam(exam_id):
+    """Modifier le titre, la date de début et la durée d'un examen (draft/scheduled)"""
+    session = None
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if user.role not in [UserRole.PROFESSOR, UserRole.ADMIN]:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        exam = session.query(OnlineExam).filter_by(id=exam_id).first()
+        if not exam:
+            session.close()
+            return jsonify({'error': 'Examen non trouvé'}), 404
+        if user.role == UserRole.PROFESSOR and exam.created_by_id != user_id:
+            session.close()
+            return jsonify({'error': 'Vous ne pouvez modifier que vos propres examens'}), 403
+        if exam.status not in ['draft', 'scheduled']:
+            session.close()
+            return jsonify({'error': 'Seuls les examens en brouillon ou planifiés peuvent être modifiés'}), 400
+        data = request.get_json() or {}
+        if 'title' in data and data['title']:
+            exam.title = data['title'].strip()
+        if 'start_time' in data and data['start_time']:
+            from datetime import datetime
+            try:
+                exam.start_time = datetime.fromisoformat(data['start_time'])
+            except ValueError:
+                pass
+        if 'duration_minutes' in data:
+            exam.duration_minutes = max(5, int(data['duration_minutes']))
+        session.commit()
+        session.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        if session:
+            session.rollback()
+            session.close()
+        print(f"❌ Erreur edit_online_exam: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/online_exams/<int:exam_id>', methods=['DELETE'])
 @jwt_required()
 def delete_online_exam(exam_id):
@@ -5925,13 +5969,32 @@ def get_professor_recent_incidents():
             incident_dict['severity'] = 'high' if incident.event_type in ['tab_switch', 'devtools_attempt'] else 'medium'
             incidents_list.append(incident_dict)
         
+        # #12 — EC récemment affectés (7 derniers jours)
+        ec_since = utcnow() - timedelta(days=7)
+        new_assignments = session.query(ECAssignment).filter(
+            ECAssignment.professor_id == user_id,
+            ECAssignment.assigned_at >= ec_since
+        ).all()
+        ec_notifs = []
+        for asgn in new_assignments:
+            ec = asgn.ec
+            ec_notifs.append({
+                'id': f'ec_assign_{asgn.id}',
+                'type': 'ec_assignment',
+                'event_type': 'ec_assignment',
+                'timestamp': asgn.assigned_at.isoformat() if asgn.assigned_at else None,
+                'details': f"Vous avez été affecté(e) à l'EC : {ec.name if ec else asgn.ec_id}",
+                'severity': 'info'
+            })
+
+        all_items = ec_notifs + incidents_list
         session.close()
-        
+
         return jsonify({
-            'incidents': incidents_list,
-            'unread_count': len(incidents_list)
+            'incidents': all_items,
+            'unread_count': len(all_items)
         })
-        
+
     except Exception as e:
         print(f"❌ Erreur get_professor_recent_incidents: {e}")
         return jsonify({'error': str(e)}), 500
