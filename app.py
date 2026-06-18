@@ -4436,6 +4436,28 @@ def generate_transcript(student_id, semester_id):
             session.close()
             return jsonify({'error': 'Semestre non trouvé'}), 404
 
+        # Vérification d'accès pour les professeurs : l'étudiant doit être inscrit
+        # dans au moins une UE dont le prof a un EC affecté dans ce semestre.
+        if user.role == UserRole.PROFESSOR:
+            prof_ec_assignments = session.query(ECAssignment).filter_by(professor_id=user_id).all()
+            prof_ue_ids = set()
+            for asgn in prof_ec_assignments:
+                ec = session.query(EC).filter_by(id=asgn.ec_id).first()
+                if ec:
+                    ue = session.query(UE).filter_by(id=ec.ue_id, semester_id=semester_id).first()
+                    if ue:
+                        prof_ue_ids.add(ue.id)
+            if prof_ue_ids:
+                enrolled = session.query(StudentUEEnrollment).filter(
+                    StudentUEEnrollment.student_id == student_id,
+                    StudentUEEnrollment.ue_id.in_(prof_ue_ids)
+                ).first()
+            else:
+                enrolled = None
+            if not enrolled:
+                session.close()
+                return jsonify({'error': 'Vous ne pouvez générer un relevé que pour les étudiants inscrits dans vos UEs.'}), 403
+
         # ── Récupérer toutes les UE du semestre avec leurs EC ──
         ues = session.query(UE).options(
             joinedload(UE.ecs)
@@ -4585,22 +4607,52 @@ def generate_transcript(student_id, semester_id):
 @app.route('/api/transcripts', methods=['GET'])
 @jwt_required()
 def get_all_transcripts():
-    """Liste de tous les relevés générés (admin/prof)"""
+    """Liste des relevés générés.
+    - Admin  : tous les relevés de la plateforme.
+    - Professeur : uniquement les relevés des étudiants inscrits dans les UEs
+                   dont ce professeur a au moins un EC affecté, OU les relevés
+                   qu'il a lui-même générés.
+    """
     try:
         user_id = int(get_jwt_identity())
         session = get_session()
-        
+
         user = session.query(User).filter_by(id=user_id).first()
         if user.role not in [UserRole.ADMIN, UserRole.PROFESSOR]:
             session.close()
             return jsonify({'error': 'Accès non autorisé'}), 403
-        
-        # ✅ CORRECTION : Ne pas utiliser joinedload sur generated_by (relation manquante)
-        transcripts = session.query(GradeTranscript).options(
+
+        query = session.query(GradeTranscript).options(
             joinedload(GradeTranscript.student),
             joinedload(GradeTranscript.semester).joinedload(Semester.formation)
-            # RETIRÉ : joinedload(GradeTranscript.generated_by)
-        ).order_by(GradeTranscript.generated_at.desc()).all()
+        )
+
+        if user.role == UserRole.PROFESSOR:
+            # 1. UEs où ce prof a au moins un EC affecté
+            ec_assignments = session.query(ECAssignment).filter_by(professor_id=user_id).all()
+            ue_ids = list({
+                session.query(EC).filter_by(id=asgn.ec_id).first().ue_id
+                for asgn in ec_assignments
+                if session.query(EC).filter_by(id=asgn.ec_id).first()
+            })
+            # 2. Étudiants inscrits dans ces UEs
+            if ue_ids:
+                enrolled_student_ids = [
+                    e.student_id for e in
+                    session.query(StudentUEEnrollment).filter(
+                        StudentUEEnrollment.ue_id.in_(ue_ids)
+                    ).all()
+                ]
+            else:
+                enrolled_student_ids = []
+            # 3. Filtrer : étudiants de ses UEs OU relevés qu'il a lui-même générés
+            from sqlalchemy import or_
+            query = query.filter(or_(
+                GradeTranscript.student_id.in_(enrolled_student_ids),
+                GradeTranscript.generated_by_id == user_id
+            ))
+
+        transcripts = query.order_by(GradeTranscript.generated_at.desc()).all()
         
         transcripts_list = []
         for t in transcripts:
