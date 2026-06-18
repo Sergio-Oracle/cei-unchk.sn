@@ -4628,29 +4628,11 @@ def get_all_transcripts():
         )
 
         if user.role == UserRole.PROFESSOR:
-            # 1. UEs où ce prof a au moins un EC affecté
-            ec_assignments = session.query(ECAssignment).filter_by(professor_id=user_id).all()
-            ue_ids = list({
-                session.query(EC).filter_by(id=asgn.ec_id).first().ue_id
-                for asgn in ec_assignments
-                if session.query(EC).filter_by(id=asgn.ec_id).first()
-            })
-            # 2. Étudiants inscrits dans ces UEs
-            if ue_ids:
-                enrolled_student_ids = [
-                    e.student_id for e in
-                    session.query(StudentUEEnrollment).filter(
-                        StudentUEEnrollment.ue_id.in_(ue_ids)
-                    ).all()
-                ]
-            else:
-                enrolled_student_ids = []
-            # 3. Filtrer : étudiants de ses UEs OU relevés qu'il a lui-même générés
-            from sqlalchemy import or_
-            query = query.filter(or_(
-                GradeTranscript.student_id.in_(enrolled_student_ids),
-                GradeTranscript.generated_by_id == user_id
-            ))
+            # Un professeur voit uniquement les relevés qu'il a lui-même générés.
+            # Il n'a pas accès aux relevés produits par d'autres professeurs,
+            # même si l'étudiant est inscrit dans l'un de ses ECs.
+            # (Le relevé est un acte de délibération : seul son auteur et l'admin y ont accès.)
+            query = query.filter(GradeTranscript.generated_by_id == user_id)
 
         transcripts = query.order_by(GradeTranscript.generated_at.desc()).all()
         
