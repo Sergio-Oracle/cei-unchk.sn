@@ -1236,9 +1236,9 @@ function _pOnOpen(textarea) {
 }
 
 function _pUpdateProgress() {
-    const blocks = document.querySelectorAll('.p-q-block');
+    const allBlocks = [...document.querySelectorAll('.p-q-block'), ...document.querySelectorAll('.p-open-block')];
     let answered = 0;
-    blocks.forEach(b => {
+    allBlocks.forEach(b => {
         const qNum = b.dataset.qnum;
         const type = b.dataset.type;
         if (type === 'qcm') { if (document.querySelector(`input[name="pqcm_${qNum}"]:checked`)) answered++; }
@@ -1246,9 +1246,9 @@ function _pUpdateProgress() {
             const tas = b.querySelectorAll('textarea[data-subkey]');
             if (tas.length && [...tas].some(ta => ta.value.trim())) answered++;
         }
-        else { const ta = document.getElementById(`popen-${qNum}`); if (ta && ta.value.trim()) answered++; }
+        else { const ta = b.querySelector('textarea'); if (ta && ta.value.trim()) answered++; }
     });
-    const total = blocks.length;
+    const total = allBlocks.length;
     const pct = total ? Math.round(answered / total * 100) : 0;
     const fill = document.getElementById('p-prog-fill');
     const label = document.getElementById('p-prog-label');
@@ -1267,24 +1267,23 @@ function _pUpdateProgress() {
 }
 
 function _collectAnswers() {
-    const blocks = document.querySelectorAll('.p-q-block');
-    if (!blocks.length) {
+    const allBlocks = [...document.querySelectorAll('.p-q-block'), ...document.querySelectorAll('.p-open-block')];
+    if (!allBlocks.length) {
         const area = document.getElementById('answer-area');
         return JSON.stringify({ reponse: area ? area.value : '' });
     }
     const qcm = {}; const texte = {};
-    blocks.forEach(b => {
+    allBlocks.forEach(b => {
         const qNum = b.dataset.qnum; const type = b.dataset.type;
         if (type === 'qcm') {
             const checked = document.querySelector(`input[name="pqcm_${qNum}"]:checked`);
             if (checked) qcm[qNum] = checked.value;
         } else if (type === 'subopen') {
-            // Sous-questions ouvertes : clé = "num_LETTRE"
             b.querySelectorAll('textarea[data-subkey]').forEach(ta => {
                 if (ta.value.trim()) texte[ta.dataset.subkey] = ta.value;
             });
         } else {
-            const ta = document.getElementById(`popen-${qNum}`);
+            const ta = b.querySelector('textarea');
             if (ta && ta.value.trim()) texte[qNum] = ta.value;
         }
     });
@@ -1301,8 +1300,8 @@ function renderExam() {
     const content = document.getElementById('exam-content');
     const raw = stripBaremeFromContent(subjectData.content || '');
     const blocks = _parseExamBlocks(raw);
-    const questions = blocks.filter(b => b.type === 'qcm' || b.type === 'open');
-    const preamble  = blocks.find(b => b.type === 'text');
+    const allQuestions = blocks.filter(b => b.type !== 'text');
+    const preamble     = blocks.find(b => b.type === 'text');
 
     // Récupérer les réponses déjà sauvegardées
     let savedQCM = {}; let savedTexte = {};
@@ -1312,7 +1311,7 @@ function renderExam() {
         savedTexte = saved.texte || {};
     } catch(e) {}
 
-    // Section instructions (préambule uniquement)
+    // Section instructions
     let preambleHtml = '';
     if (preamble) {
         const txt = preamble.content.replace(/══+/g,'').replace(/──+/g,'').trim();
@@ -1321,22 +1320,14 @@ function renderExam() {
             <h2 style="margin-bottom:10px;"><i class="fas fa-info-circle" style="color:var(--primary)"></i> Instructions</h2>
             <div style="font-size:14px;line-height:1.8;color:var(--dark);white-space:pre-wrap;">${escapeHtml(txt)}</div>
         </div>`;
-    } else if (!questions.length) {
-        // Pas de questions parsées → afficher le texte brut complet
-        preambleHtml = `
-        <div class="subject-card">
-            <h2><i class="fas fa-file-alt" style="color:var(--primary)"></i> Sujet</h2>
-            <div class="content-text">${escapeHtml(raw)}</div>
-        </div>`;
     }
 
-    // Si pas de questions détectées → textarea classique
-    if (!questions.length) {
-        content.innerHTML = preambleHtml + `
+    // Aucune question → textarea classique
+    if (!allQuestions.length) {
+        content.innerHTML = (preambleHtml || `<div class="subject-card"><h2><i class="fas fa-file-alt"></i> Sujet</h2><div class="content-text">${escapeHtml(raw)}</div></div>`) + `
         <div class="answer-card">
             <h2><i class="fas fa-pen" style="color:var(--success)"></i> Votre réponse</h2>
-            <textarea id="answer-area" class="answer-textarea"
-                placeholder="Rédigez votre réponse ici…">${escapeHtml(subjectData.current_answer || '')}</textarea>
+            <textarea id="answer-area" class="answer-textarea" placeholder="Rédigez votre réponse ici…">${escapeHtml(subjectData.current_answer || '')}</textarea>
             <div class="save-indicator" id="save-indicator">
                 <i class="fas fa-circle-notch fa-spin" style="display:none" id="save-spinner"></i>
                 <span id="save-text">Les réponses sont sauvegardées automatiquement</span>
@@ -1345,71 +1336,69 @@ function renderExam() {
         return;
     }
 
-    // Barre de progression
-    const total = questions.length;
+    // Séparer QCM (Partie 1) et Questions ouvertes (Partie 2)
+    const p1Questions = allQuestions.filter(b => b.type === 'qcm');
+    const p2Questions = allQuestions.filter(b => b.type === 'open' || b.type === 'subopen');
+    const totalQ = allQuestions.length;
+
+    // ── Barre de progression globale ──
     const progressHtml = `
-    <div style="margin-bottom:16px;">
+    <div style="margin-bottom:20px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-            <span style="font-size:12px;color:#64748b;font-weight:600;"><i class="fas fa-tasks"></i> Progression</span>
-            <span id="p-prog-label" style="font-size:12px;color:#3b82f6;font-weight:700;">0 / ${total} répondu(es)</span>
+            <span style="font-size:12px;color:#64748b;font-weight:600;"><i class="fas fa-tasks"></i> Progression globale</span>
+            <span id="p-prog-label" style="font-size:12px;color:#3b82f6;font-weight:700;">0 / ${totalQ} répondu(es)</span>
         </div>
         <div style="height:7px;background:#e2e8f0;border-radius:99px;overflow:hidden;">
             <div id="p-prog-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#10b981);border-radius:99px;transition:width .3s;"></div>
         </div>
     </div>`;
 
-    // Pastilles de navigation
-    const dots = questions.map((q, i) =>
-        `<span class="p-q-dot" data-qnum="${q.num}" data-idx="${i}" data-type="${q.type}" data-answered="0"
-            onclick="_pGotoQ(${i})" title="Q${i+1}"
-            style="width:24px;height:24px;border-radius:50%;background:rgba(255,255,255,.2);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;cursor:pointer;border:1.5px solid rgba(255,255,255,.4);transition:all .15s;flex-shrink:0;">${i+1}</span>`
-    ).join('');
+    // ── Partie 1 : QCM ──
+    let part1Html = '';
+    if (p1Questions.length) {
+        const dots = p1Questions.map((q, i) =>
+            `<span class="p-q-dot" data-qnum="${q.num}" data-idx="${i}" data-type="qcm" data-answered="0"
+                onclick="_pGotoQ(${i})" title="Q${i+1}"
+                style="width:24px;height:24px;border-radius:50%;background:rgba(255,255,255,.2);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;cursor:pointer;border:1.5px solid rgba(255,255,255,.4);transition:all .15s;flex-shrink:0;">${i+1}</span>`
+        ).join('');
 
-    const navHtml = `
-    <div style="background:#1e293b;border-radius:12px;padding:12px 16px;margin-bottom:16px;">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-            <button id="p-nav-prev" onclick="_pGotoQ(_pQIndex-1)" disabled
-                style="background:rgba(255,255,255,.1);border:none;color:#fff;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;">
-                <i class="fas fa-chevron-left"></i> Préc.
-            </button>
-            <span id="p-nav-counter" style="flex:1;text-align:center;font-size:14px;font-weight:700;color:#f1f5f9;">Question 1 / ${total}</span>
-            <button id="p-nav-next" onclick="_pGotoQ(_pQIndex+1)"
-                style="background:#3b82f6;border:none;color:#fff;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;">
-                Suiv. <i class="fas fa-chevron-right"></i>
-            </button>
-        </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;">${dots}</div>
-    </div>`;
+        const navHtml = `
+        <div style="background:#1e293b;border-radius:12px;padding:12px 16px;margin-bottom:16px;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                <button id="p-nav-prev" onclick="_pGotoQ(_pQIndex-1)" disabled
+                    style="background:rgba(255,255,255,.1);border:none;color:#fff;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;">
+                    <i class="fas fa-chevron-left"></i> Préc.
+                </button>
+                <span id="p-nav-counter" style="flex:1;text-align:center;font-size:14px;font-weight:700;color:#f1f5f9;">Q 1 / ${p1Questions.length}</span>
+                <button id="p-nav-next" onclick="_pNavNext()"
+                    style="background:#3b82f6;border:none;color:#fff;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;">
+                    Suiv. <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;">${dots}</div>
+        </div>`;
 
-    // Rendu des blocs questions
-    let qHtml = '';
-    questions.forEach((block, qi) => {
-        const savedVal = block.type === 'qcm' ? (savedQCM[block.num] || '') : (savedTexte[block.num] || '');
-        const answered = block.type === 'qcm' ? !!savedVal : !!(savedVal && savedVal.trim());
-        const border = answered ? '#3b82f6' : '#e2e8f0';
-        const badge = block.type === 'qcm'
-            ? `<span style="background:#eff6ff;color:#3b82f6;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:700;">QCM</span>`
-            : `<span style="background:#ecfdf5;color:#065f46;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:700;">Ouvert</span>`;
-
-        qHtml += `<div class="p-q-block" id="pqblock-${block.num}" data-qnum="${block.num}" data-type="${block.type}"
-            style="display:${qi===0?'block':'none'};border:2px solid ${border};border-radius:16px;padding:22px 24px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.06);transition:border-color .2s;">
-            <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:16px;">
-                <span style="width:34px;height:34px;border-radius:50%;background:#0f172a;color:#fff;font-weight:800;font-size:15px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">${block.num}</span>
-                <div style="flex:1;">
-                    <div style="font-weight:700;font-size:15px;color:#0f172a;line-height:1.5;">${escapeHtml(block.text)}</div>
-                    ${block.extraLines && block.extraLines.length ? `<div style="font-size:14px;color:#475569;margin-top:6px;line-height:1.6;">${block.extraLines.map(escapeHtml).join('<br>')}</div>` : ''}
+        let qcmHtml = '';
+        p1Questions.forEach((block, qi) => {
+            const savedVal = savedQCM[block.num] || '';
+            const sel_border = savedVal ? '#3b82f6' : '#e2e8f0';
+            qcmHtml += `<div class="p-q-block" id="pqblock-${block.num}" data-qnum="${block.num}" data-type="qcm"
+                style="display:${qi===0?'block':'none'};border:2px solid ${sel_border};border-radius:16px;padding:22px 24px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.06);transition:border-color .2s;">
+                <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:16px;">
+                    <span style="width:34px;height:34px;border-radius:50%;background:#1e40af;color:#fff;font-weight:800;font-size:15px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">${block.num}</span>
+                    <div style="flex:1;">
+                        <div style="font-weight:700;font-size:15px;color:#0f172a;line-height:1.5;">${escapeHtml(block.text)}</div>
+                        ${block.extraLines && block.extraLines.length ? `<div style="font-size:14px;color:#475569;margin-top:6px;">${block.extraLines.map(escapeHtml).join('<br>')}</div>` : ''}
+                    </div>
+                    <span style="background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;flex-shrink:0;">QCM</span>
                 </div>
-                ${badge}
-            </div>`;
-
-        if (block.type === 'qcm') {
-            qHtml += `<div id="pchoices-${block.num}" style="display:flex;flex-direction:column;gap:10px;">`;
+                <div id="pchoices-${block.num}" style="display:flex;flex-direction:column;gap:10px;">`;
             block.choices.forEach(c => {
                 const col = _P_COLORS[c.letter] || '#3b82f6';
                 const sel = savedVal === c.letter;
-                qHtml += `
+                qcmHtml += `
                 <label class="p-choice" id="pchoice-${block.num}-${c.letter}"
-                    style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-radius:12px;border:2px solid ${sel?col:'#e2e8f0'};background:${sel?col+'18':'#fff'};cursor:pointer;transition:all .18s;user-select:none;box-shadow:0 1px 3px rgba(0,0,0,.05);"
+                    style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-radius:12px;border:2px solid ${sel?col:'#e2e8f0'};background:${sel?col+'18':'#fff'};cursor:pointer;transition:all .18s;user-select:none;"
                     onclick="_pOnQCM('${block.num}','${c.letter}')">
                     <input type="radio" name="pqcm_${block.num}" value="${c.letter}" ${sel?'checked':''} style="display:none;">
                     <span class="p-letter" style="width:32px;height:32px;border-radius:50%;background:${sel?col:'#f1f5f9'};color:${sel?'#fff':'#64748b'};font-weight:700;font-size:14px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .18s;">${c.letter}</span>
@@ -1417,35 +1406,94 @@ function renderExam() {
                     <i class="fas fa-check-circle p-chk" style="color:${col};font-size:18px;flex-shrink:0;display:${sel?'inline':'none'};"></i>
                 </label>`;
             });
-            qHtml += `</div>`;
-        } else if (block.type === 'subopen') {
-            // Sous-questions ouvertes : chaque lettre a son propre textarea
-            qHtml += `<div style="display:flex;flex-direction:column;gap:14px;">`;
-            block.choices.forEach(c => {
-                const subKey = block.num + '_' + c.letter;
-                const subVal = savedTexte[subKey] || '';
-                qHtml += `
-                <div style="border:1.5px solid #e2e8f0;border-radius:10px;padding:14px 16px;background:#f8fafc;">
-                    <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;">
-                        <span style="width:26px;height:26px;border-radius:50%;background:#e0e7ff;color:#3730a3;font-weight:700;font-size:13px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">${c.letter}</span>
-                        <span style="font-size:14px;font-weight:600;color:#1e293b;line-height:1.5;">${escapeHtml(c.text)}</span>
+            qcmHtml += `</div></div>`;
+        });
+
+        const finishBtn = p2Questions.length ? `
+        <div id="p1-finish-btn" style="display:none;margin-top:16px;">
+            <button onclick="_pGoToPart2()"
+                style="width:100%;background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;border-radius:12px;padding:16px;font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 4px 12px rgba(16,185,129,.3);">
+                <i class="fas fa-arrow-right"></i> Terminer le QCM — Passer à la Partie 2
+            </button>
+        </div>` : '';
+
+        part1Html = `
+        <div id="part1-section" style="margin-bottom:8px;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding:12px 16px;background:#eff6ff;border-radius:10px;border-left:4px solid #3b82f6;">
+                <i class="fas fa-check-square" style="color:#3b82f6;font-size:18px;"></i>
+                <div>
+                    <div style="font-weight:700;font-size:14px;color:#1e40af;">Partie 1 — Questions à Choix Multiples</div>
+                    <div style="font-size:12px;color:#3b82f6;">${p1Questions.length} question${p1Questions.length>1?'s':''} • Cochez la bonne réponse</div>
+                </div>
+            </div>
+            ${navHtml}${qcmHtml}${finishBtn}
+        </div>`;
+    }
+
+    // ── Partie 2 : Questions ouvertes ──
+    let part2Html = '';
+    if (p2Questions.length) {
+        let openHtml = '';
+        p2Questions.forEach((block, qi) => {
+            const savedVal = savedTexte[block.num] || '';
+            const anyAnswered = block.type === 'subopen'
+                ? block.choices.some(c => !!(savedTexte[block.num + '_' + c.letter] || '').trim())
+                : !!(savedVal.trim());
+            const border = anyAnswered ? '#10b981' : '#e2e8f0';
+
+            openHtml += `<div class="p-open-block" id="pqblock-${block.num}" data-qnum="${block.num}" data-type="${block.type}"
+                style="border:2px solid ${border};border-radius:16px;padding:22px 24px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.05);margin-bottom:16px;transition:border-color .2s;">
+                <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:16px;">
+                    <span style="width:34px;height:34px;border-radius:50%;background:#065f46;color:#fff;font-weight:800;font-size:15px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">${block.num}</span>
+                    <div style="flex:1;">
+                        <div style="font-weight:700;font-size:15px;color:#0f172a;line-height:1.5;">${escapeHtml(block.text)}</div>
+                        ${block.extraLines && block.extraLines.length ? `<div style="font-size:14px;color:#475569;margin-top:6px;">${block.extraLines.map(escapeHtml).join('<br>')}</div>` : ''}
                     </div>
-                    <textarea id="popen-${block.num}-${c.letter}" data-qnum="${block.num}" data-subkey="${subKey}"
-                        rows="3" placeholder="Votre réponse…"
-                        oninput="_pOnOpen(this)"
-                        style="font-size:14px;font-family:inherit;resize:vertical;border-radius:8px;border:1.5px solid #e2e8f0;padding:10px 12px;width:100%;box-sizing:border-box;transition:border-color .2s;">${escapeHtml(subVal)}</textarea>
+                    <span style="background:#ecfdf5;color:#065f46;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;flex-shrink:0;">Ouvert</span>
                 </div>`;
-            });
-            qHtml += `</div>`;
-        } else {
-            qHtml += `
-            <textarea id="popen-${block.num}" data-qnum="${block.num}"
-                rows="5" placeholder="Votre réponse à la question ${block.num}…"
-                oninput="_pOnOpen(this)"
-                style="font-size:14px;font-family:inherit;resize:vertical;border-radius:8px;border:1.5px solid #e2e8f0;padding:12px 14px;width:100%;box-sizing:border-box;transition:border-color .2s;">${escapeHtml(savedVal)}</textarea>`;
-        }
-        qHtml += `</div>`;
-    });
+
+            if (block.type === 'subopen') {
+                openHtml += `<div style="display:flex;flex-direction:column;gap:14px;">`;
+                block.choices.forEach(c => {
+                    const subKey = block.num + '_' + c.letter;
+                    const subVal = savedTexte[subKey] || '';
+                    openHtml += `
+                    <div style="border:1.5px solid #d1fae5;border-radius:10px;padding:14px 16px;background:#f0fdf4;">
+                        <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;">
+                            <span style="width:26px;height:26px;border-radius:50%;background:#bbf7d0;color:#065f46;font-weight:700;font-size:13px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">${c.letter}</span>
+                            <span style="font-size:14px;font-weight:600;color:#1e293b;line-height:1.5;">${escapeHtml(c.text)}</span>
+                        </div>
+                        <textarea data-qnum="${block.num}" data-subkey="${subKey}" rows="4"
+                            placeholder="Rédigez votre réponse ici…"
+                            oninput="_pOnOpen(this)"
+                            style="font-size:14px;font-family:inherit;resize:vertical;border-radius:8px;border:1.5px solid #86efac;padding:10px 12px;width:100%;box-sizing:border-box;">${escapeHtml(subVal)}</textarea>
+                    </div>`;
+                });
+                openHtml += `</div>`;
+            } else {
+                openHtml += `
+                <textarea data-qnum="${block.num}" rows="6"
+                    placeholder="Rédigez votre réponse à la question ${block.num}…"
+                    oninput="_pOnOpen(this)"
+                    style="font-size:14px;font-family:inherit;resize:vertical;border-radius:8px;border:1.5px solid #e2e8f0;padding:12px 14px;width:100%;box-sizing:border-box;">${escapeHtml(savedVal)}</textarea>`;
+            }
+            openHtml += `</div>`;
+        });
+
+        const p2InitialDisplay = p1Questions.length ? 'none' : 'block';
+        part2Html = `
+        <div id="part2-section" style="display:${p2InitialDisplay};">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding:12px 16px;background:#ecfdf5;border-radius:10px;border-left:4px solid #10b981;">
+                <i class="fas fa-pen-alt" style="color:#10b981;font-size:18px;"></i>
+                <div style="flex:1;">
+                    <div style="font-weight:700;font-size:14px;color:#065f46;">Partie 2 — Questions à réponses courtes / développées</div>
+                    <div style="font-size:12px;color:#10b981;">${p2Questions.length} question${p2Questions.length>1?'s':''} • Rédigez vos réponses dans les zones ci-dessous</div>
+                </div>
+                ${p1Questions.length ? `<button onclick="_pBackToPart1()" style="background:#d1fae5;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;color:#065f46;cursor:pointer;"><i class="fas fa-arrow-left"></i> Retour QCM</button>` : ''}
+            </div>
+            ${openHtml}
+        </div>`;
+    }
 
     content.innerHTML = preambleHtml + `
     <div class="answer-card">
@@ -1456,15 +1504,40 @@ function renderExam() {
                 <span id="save-text">Sauvegarde automatique</span>
             </div>
         </div>
-        ${progressHtml}${navHtml}${qHtml}
+        ${progressHtml}
+        ${part1Html}
+        ${part2Html}
         <p style="margin-top:16px;font-size:12px;color:#94a3b8;text-align:center;">
             <i class="fas fa-save"></i> Sauvegarde automatique toutes les 30 secondes
         </p>
     </div>`;
 
     _pQIndex = 0;
-    _pGotoQ(0);
+    if (p1Questions.length) _pGotoQ(0);
     _pUpdateProgress();
+}
+
+function _pNavNext() {
+    const p1Blocks = document.querySelectorAll('.p-q-block');
+    if (_pQIndex < p1Blocks.length - 1) {
+        _pGotoQ(_pQIndex + 1);
+    } else {
+        // Dernière question QCM → montrer bouton "Passer à la Partie 2"
+        const finBtn = document.getElementById('p1-finish-btn');
+        if (finBtn) finBtn.style.display = 'block';
+    }
+}
+
+function _pGoToPart2() {
+    saveAnswers();
+    document.getElementById('part1-section').style.display = 'none';
+    const p2 = document.getElementById('part2-section');
+    if (p2) { p2.style.display = 'block'; p2.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+}
+
+function _pBackToPart1() {
+    document.getElementById('part2-section').style.display = 'none';
+    document.getElementById('part1-section').style.display = 'block';
 }
 
 function escapeHtml(text) {
