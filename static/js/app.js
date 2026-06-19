@@ -3472,8 +3472,11 @@ async function loadSecurityReport() {
             };
             const ic = icons[e.event] || 'fa-circle';
             const cl = riskColors[e.event] || '#94a3b8';
+            const photoBtn = e.event === 'face_reference_captured'
+                ? `<button onclick="viewFaceReferencePhoto(${e.attempt_id || 'null'})" style="margin-left:8px;background:#eff6ff;border:1px solid #bfdbfe;color:#2563eb;padding:2px 8px;border-radius:6px;font-size:11px;cursor:pointer;"><i class="fas fa-image"></i> Photo</button>`
+                : '';
             return `<tr>
-                <td style="padding:10px 14px;font-size:13px;"><i class="fas ${ic}" style="color:${cl};margin-right:8px;"></i>${evtLabels[e.event] || e.event}</td>
+                <td style="padding:10px 14px;font-size:13px;"><i class="fas ${ic}" style="color:${cl};margin-right:8px;"></i>${evtLabels[e.event] || e.event}${photoBtn}</td>
                 <td style="padding:10px 14px;font-size:13px;font-weight:700;">${e.count}</td>
             </tr>`;
         }).join('');
@@ -3494,6 +3497,12 @@ async function loadSecurityReport() {
                         ${a.status === 'banned' ? 'Banni' : a.status}
                     </span>
                     ${a.ban_reason ? `<div style="font-size:10px;color:#94a3b8;margin-top:2px;">${a.ban_reason}</div>` : ''}
+                </td>
+                <td style="padding:10px 14px;">
+                    <button onclick="viewFaceReferencePhoto(${a.attempt_id})" title="Photo de référence"
+                        style="background:#eff6ff;border:1px solid #bfdbfe;color:#2563eb;padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer;">
+                        <i class="fas fa-camera"></i> Photo
+                    </button>
                 </td>
             </tr>`;
         }).join('');
@@ -3543,6 +3552,7 @@ async function loadSecurityReport() {
                             <th style="padding:8px 14px;text-align:center;font-size:12px;color:#64748b;">Onglets</th>
                             <th style="padding:8px 14px;text-align:center;font-size:12px;color:#64748b;">Sans visage</th>
                             <th style="padding:8px 14px;text-align:left;font-size:12px;color:#64748b;">Statut</th>
+                            <th style="padding:8px 14px;text-align:center;font-size:12px;color:#64748b;">Photo</th>
                         </tr></thead>
                         <tbody>${riskRows}</tbody>
                     </table>
@@ -3558,6 +3568,42 @@ async function loadSecurityReport() {
         `;
     } catch(e) { showAlert(humanError(e), 'error'); }
     finally { showLoader(false); }
+}
+
+async function viewFaceReferencePhoto(attemptId) {
+    if (!attemptId) {
+        // La tentative n'est pas dans le résumé agrégé — chercher la dernière connue
+        showModal(`<div style="text-align:center;padding:24px;">
+            <i class="fas fa-camera" style="font-size:48px;color:#94a3b8;"></i>
+            <p style="color:#64748b;margin-top:12px;">Photo non disponible : identifiant de tentative inconnu dans ce résumé.<br>
+            Consultez le détail d'une tentative pour voir la photo.</p>
+        </div>`);
+        return;
+    }
+    showLoader(true);
+    try {
+        const res = await authenticatedFetch(`/api/exam_attempts/${attemptId}/face_reference`);
+        const data = await res.json();
+        showLoader(false);
+        if (data.image_data) {
+            const src = data.image_data.startsWith('data:') ? data.image_data : `data:image/jpeg;base64,${data.image_data}`;
+            showModal(`
+                <div style="text-align:center;">
+                    <h3 style="margin:0 0 16px;"><i class="fas fa-camera" style="color:#3b82f6;"></i> Photo de référence</h3>
+                    <img src="${src}" alt="Photo de référence" style="max-width:100%;border-radius:10px;border:2px solid #e2e8f0;box-shadow:0 4px 16px rgba(0,0,0,0.12);">
+                    <p style="color:#64748b;font-size:13px;margin-top:12px;">Capturée au démarrage de l'examen</p>
+                </div>
+            `, '500px');
+        } else {
+            showModal(`<div style="text-align:center;padding:24px;">
+                <i class="fas fa-camera-slash" style="font-size:48px;color:#94a3b8;"></i>
+                <p style="color:#64748b;margin-top:12px;">${data.message || 'Photo non disponible.'}</p>
+            </div>`);
+        }
+    } catch(e) {
+        showLoader(false);
+        showAlert('Erreur lors du chargement de la photo.', 'error');
+    }
 }
 
 async function loadReclamations() {

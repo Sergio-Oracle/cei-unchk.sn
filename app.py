@@ -4150,7 +4150,28 @@ def log_exam_activity(attempt_id):
             if max_sw >= 0 and attempt.tab_switches > max_sw:
                 ban_reason = f"Trop de changements de contexte : {attempt.tab_switches} (seuil : {max_sw})"
 
-        # ── 3. Visage non détecté (face_absent = alias FaceDetector.js) ──────
+        # ── 3. Photo de référence — stocker dans CameraLog si image fournie ────
+        elif event_type == 'face_reference_captured':
+            # event_data peut être une chaîne texte OU un JSON avec image_data base64
+            import json as _json
+            photo_b64 = None
+            try:
+                parsed = _json.loads(event_data) if isinstance(event_data, str) else event_data
+                if isinstance(parsed, dict):
+                    photo_b64 = parsed.get('image_data') or parsed.get('photo')
+                    log.event_data = parsed.get('label', event_data)
+            except Exception:
+                pass
+            if photo_b64:
+                cam_log = CameraLog(
+                    attempt_id=attempt_id,
+                    event_type='face_reference_captured',
+                    violation_type='face_reference',
+                    image_data=photo_b64
+                )
+                session.add(cam_log)
+
+        # ── 4. Visage non détecté (face_absent = alias FaceDetector.js) ──────
         elif event_type in ('no_face_detected', 'face_absent'):
             no_face_count = (attempt.no_face_count or 0) + 1
             attempt.no_face_count = no_face_count
@@ -5962,6 +5983,64 @@ def plagiarism_check(exam_id):
 # RAPPORT D'INTÉGRITÉ PDF
 # ============================================================================
 
+@app.route('/api/exam_attempts/<int:attempt_id>/face_reference', methods=['GET'])
+@jwt_required()
+def get_face_reference_photo(attempt_id):
+    """Retourne la photo de référence de l'étudiant pour une tentative (prof/admin)."""
+    user_id = int(get_jwt_identity())
+    session = get_session()
+    try:
+        user = session.query(User).filter_by(id=user_id).first()
+        if not user or user.role not in [UserRole.ADMIN, UserRole.PROFESSOR]:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+
+        attempt = session.query(ExamAttempt).filter_by(id=attempt_id).first()
+        if not attempt:
+            session.close()
+            return jsonify({'error': 'Tentative non trouvée'}), 404
+
+        # Vérification accès prof
+        if user.role == UserRole.PROFESSOR:
+            exam = session.query(OnlineExam).filter_by(id=attempt.exam_id).first()
+            if not exam or exam.created_by_id != user_id:
+                session.close()
+                return jsonify({'error': 'Accès non autorisé à cet examen'}), 403
+
+        # Chercher dans CameraLog
+        cam = session.query(CameraLog).filter_by(
+            attempt_id=attempt_id,
+            event_type='face_reference_captured'
+        ).order_by(CameraLog.timestamp.asc()).first()
+
+        if cam and cam.image_data:
+            session.close()
+            return jsonify({'image_data': cam.image_data, 'source': 'camera_log'})
+
+        # Fallback : chercher dans event_data de ExamActivityLog
+        import json as _json
+        log = session.query(ExamActivityLog).filter_by(
+            attempt_id=attempt_id,
+            event_type='face_reference_captured'
+        ).first()
+        if log and log.event_data:
+            try:
+                parsed = _json.loads(log.event_data)
+                if isinstance(parsed, dict) and ('image_data' in parsed or 'photo' in parsed):
+                    img = parsed.get('image_data') or parsed.get('photo')
+                    session.close()
+                    return jsonify({'image_data': img, 'source': 'activity_log'})
+            except Exception:
+                pass
+
+        session.close()
+        return jsonify({'image_data': None, 'message': 'Photo non disponible (capture non stockée)'})
+    except Exception as e:
+        try: session.rollback(); session.close()
+        except: pass
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/exam_attempts/<int:attempt_id>/integrity-report', methods=['GET'])
 @jwt_required()
 def download_integrity_report(attempt_id):
@@ -6817,20 +6896,42 @@ def admin_security_report():
             session.close()
             return jsonify({'error': 'Accès non autorisé'}), 403
 
-        # Top événements
         from sqlalchemy import func as sqlfunc
-        event_counts = session.query(
+
+        # Restriction prof : seulement ses propres examens
+        prof_exam_ids = None
+        if user.role == UserRole.PROFESSOR:
+            prof_exam_ids = [
+                e.id for e in session.query(OnlineExam).filter_by(created_by_id=user_id).all()
+            ]
+            if not prof_exam_ids:
+                session.close()
+                return jsonify({'event_summary': [], 'high_risk': [], 'banned_count': 0})
+
+        # Top événements (filtrés si prof)
+        log_query = session.query(
             ExamActivityLog.event_type,
             sqlfunc.count(ExamActivityLog.id).label('cnt')
-        ).group_by(ExamActivityLog.event_type).order_by(sqlfunc.count(ExamActivityLog.id).desc()).all()
+        )
+        if prof_exam_ids is not None:
+            prof_attempt_ids = [
+                a.id for a in session.query(ExamAttempt).filter(
+                    ExamAttempt.exam_id.in_(prof_exam_ids)
+                ).all()
+            ]
+            log_query = log_query.filter(ExamActivityLog.attempt_id.in_(prof_attempt_ids or [0]))
+        event_counts = log_query.group_by(ExamActivityLog.event_type).order_by(
+            sqlfunc.count(ExamActivityLog.id).desc()
+        ).all()
 
-        # Tentatives à haut risque
-        risky = session.query(ExamAttempt).options(
+        # Tentatives à haut risque (filtrées si prof)
+        risky_q = session.query(ExamAttempt).options(
             joinedload(ExamAttempt.student),
             joinedload(ExamAttempt.exam)
-        ).filter(ExamAttempt.risk_score >= 70).order_by(
-            ExamAttempt.risk_score.desc()
-        ).limit(20).all()
+        ).filter(ExamAttempt.risk_score >= 70)
+        if prof_exam_ids is not None:
+            risky_q = risky_q.filter(ExamAttempt.exam_id.in_(prof_exam_ids))
+        risky = risky_q.order_by(ExamAttempt.risk_score.desc()).limit(20).all()
 
         risky_list = [{
             'attempt_id':     a.id,
@@ -6845,10 +6946,11 @@ def admin_security_report():
             'ban_reason':     a.ban_reason
         } for a in risky]
 
-        # Tentatives bannies
-        banned_count = session.query(ExamAttempt).filter(
-            ExamAttempt.status == AttemptStatus.BANNED
-        ).count()
+        # Tentatives bannies (filtrées si prof)
+        banned_q = session.query(ExamAttempt).filter(ExamAttempt.status == AttemptStatus.BANNED)
+        if prof_exam_ids is not None:
+            banned_q = banned_q.filter(ExamAttempt.exam_id.in_(prof_exam_ids))
+        banned_count = banned_q.count()
 
         session.close()
         return jsonify({
