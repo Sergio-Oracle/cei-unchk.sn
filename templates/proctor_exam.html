@@ -1145,6 +1145,139 @@ async function init() {
 // RENDU DE L'EXAMEN
 // ═══════════════════════════════════════════════════════════
 
+// ─── Parsing des blocs QCM / Ouvertes ─────────────────────────
+function _parseExamBlocks(raw) {
+    const QNUM  = /^(\d{1,2})\s*[.)\-:]\s*(.*)/;
+    const CHOIX = /^([A-Fa-f])\s*[.)\-:]\s*(.*)/;
+    const lines = raw.split('\n');
+    const blocks = [];
+    let i = 0;
+    const preamble = [];
+    while (i < lines.length && !lines[i].trim().match(QNUM)) { preamble.push(lines[i]); i++; }
+    if (preamble.join('').trim()) blocks.push({ type: 'text', content: preamble.join('\n') });
+    while (i < lines.length) {
+        const line = lines[i].trim();
+        const qm = line.match(QNUM);
+        if (!qm) { i++; continue; }
+        const num = qm[1]; const qText = qm[2]; i++;
+        const extraLines = []; const choices = [];
+        while (i < lines.length) {
+            const nl = lines[i].trim();
+            if (!nl) { i++; if (choices.length >= 2) break; continue; }
+            if (nl.match(QNUM) && !nl.match(CHOIX)) break;
+            const cm = nl.match(CHOIX);
+            if (cm) { choices.push({ letter: cm[1].toUpperCase(), text: cm[2] }); i++; }
+            else if (choices.length === 0) { extraLines.push(nl); i++; }
+            else break;
+        }
+        blocks.push({ type: choices.length >= 2 ? 'qcm' : 'open', num, text: qText, extraLines, choices });
+    }
+    return blocks;
+}
+
+// ─── État navigation ──────────────────────────────────────────
+let _pQIndex = 0;
+const _P_COLORS = { A:'#3b82f6', B:'#10b981', C:'#f59e0b', D:'#ef4444', E:'#8b5cf6', F:'#06b6d4' };
+
+function _pGotoQ(idx) {
+    const blocks = document.querySelectorAll('.p-q-block');
+    if (!blocks.length) return;
+    _pQIndex = Math.max(0, Math.min(idx, blocks.length - 1));
+    blocks.forEach((b, i) => b.style.display = i === _pQIndex ? 'block' : 'none');
+    document.getElementById('p-nav-counter').textContent = `Question ${_pQIndex + 1} / ${blocks.length}`;
+    document.getElementById('p-nav-prev').disabled = _pQIndex === 0;
+    document.getElementById('p-nav-next').disabled = _pQIndex === blocks.length - 1;
+    // Mettre à jour les pastilles
+    document.querySelectorAll('.p-q-dot').forEach((d, i) => {
+        d.style.background = i === _pQIndex ? '#3b82f6' : (d.dataset.answered === '1' ? '#10b981' : 'rgba(255,255,255,.2)');
+        d.style.border = i === _pQIndex ? '2px solid #60a5fa' : '1.5px solid rgba(255,255,255,.4)';
+    });
+}
+
+function _pOnQCM(qNum, letter) {
+    // Cocher le radio
+    const radio = document.querySelector(`input[name="pqcm_${qNum}"][value="${letter}"]`);
+    if (radio) radio.checked = true;
+    // Mettre à jour le style des choix
+    document.querySelectorAll(`#pchoices-${qNum} .p-choice`).forEach(lbl => {
+        const lm = lbl.id.match(/pchoice-(\w+)-([A-F])/);
+        const ltr = lm ? lm[2] : null;
+        const col = _P_COLORS[ltr] || '#3b82f6';
+        const sel = lbl.id === `pchoice-${qNum}-${letter}`;
+        lbl.style.borderColor = sel ? col : '#e2e8f0';
+        lbl.style.background  = sel ? col + '18' : '#fff';
+        const circle = lbl.querySelector('.p-letter');
+        if (circle) { circle.style.background = sel ? col : '#f1f5f9'; circle.style.color = sel ? '#fff' : '#64748b'; }
+        const chk = lbl.querySelector('.p-chk');
+        if (chk) chk.style.display = sel ? 'inline' : 'none';
+    });
+    const qBlock = document.getElementById(`pqblock-${qNum}`);
+    if (qBlock) { qBlock.style.borderColor = '#3b82f6'; qBlock.querySelector('.p-q-dot-inline') && (qBlock.querySelector('.p-q-dot-inline').dataset.answered = '1'); }
+    // Pastille verte
+    const dot = document.querySelector(`.p-q-dot[data-qnum="${qNum}"]`);
+    if (dot) { dot.dataset.answered = '1'; if (_pQIndex !== parseInt(dot.dataset.idx)) dot.style.background = '#10b981'; }
+    _pUpdateProgress();
+    saveAnswers();
+    // Avancer automatiquement après 400ms
+    const blocks = document.querySelectorAll('.p-q-block');
+    if (_pQIndex < blocks.length - 1) setTimeout(() => _pGotoQ(_pQIndex + 1), 400);
+}
+
+function _pOnOpen(textarea) {
+    const qNum = textarea.dataset.qnum;
+    const qBlock = document.getElementById(`pqblock-${qNum}`);
+    if (qBlock) qBlock.style.borderColor = textarea.value.trim() ? '#10b981' : '#e2e8f0';
+    _pUpdateProgress();
+}
+
+function _pUpdateProgress() {
+    const blocks = document.querySelectorAll('.p-q-block');
+    let answered = 0;
+    blocks.forEach(b => {
+        const qNum = b.dataset.qnum;
+        const type = b.dataset.type;
+        if (type === 'qcm') { if (document.querySelector(`input[name="pqcm_${qNum}"]:checked`)) answered++; }
+        else { const ta = document.getElementById(`popen-${qNum}`); if (ta && ta.value.trim()) answered++; }
+    });
+    const total = blocks.length;
+    const pct = total ? Math.round(answered / total * 100) : 0;
+    const fill = document.getElementById('p-prog-fill');
+    const label = document.getElementById('p-prog-label');
+    if (fill) fill.style.width = pct + '%';
+    if (label) label.textContent = answered + ' / ' + total + ' répondu(es)';
+    // Mettre à jour les pastilles
+    document.querySelectorAll('.p-q-dot').forEach(d => {
+        const qNum = d.dataset.qnum; const idx = parseInt(d.dataset.idx);
+        const type = d.dataset.type;
+        let ans = false;
+        if (type === 'qcm') ans = !!document.querySelector(`input[name="pqcm_${qNum}"]:checked`);
+        else { const ta = document.getElementById(`popen-${qNum}`); ans = ta && !!ta.value.trim(); }
+        d.dataset.answered = ans ? '1' : '0';
+        if (idx !== _pQIndex) d.style.background = ans ? '#10b981' : 'rgba(255,255,255,.2)';
+    });
+}
+
+function _collectAnswers() {
+    const blocks = document.querySelectorAll('.p-q-block');
+    if (!blocks.length) {
+        const area = document.getElementById('answer-area');
+        return JSON.stringify({ reponse: area ? area.value : '' });
+    }
+    const qcm = {}; const texte = {};
+    blocks.forEach(b => {
+        const qNum = b.dataset.qnum; const type = b.dataset.type;
+        if (type === 'qcm') {
+            const checked = document.querySelector(`input[name="pqcm_${qNum}"]:checked`);
+            if (checked) qcm[qNum] = checked.value;
+        } else {
+            const ta = document.getElementById(`popen-${qNum}`);
+            if (ta && ta.value.trim()) texte[qNum] = ta.value;
+        }
+    });
+    return JSON.stringify({ qcm, texte });
+}
+
+// ─── Rendu principal ──────────────────────────────────────────
 function renderExam() {
     document.getElementById('exam-title').textContent = subjectData.exam_title || 'Examen';
     document.getElementById('exam-subtitle').textContent =
@@ -1152,11 +1285,40 @@ function renderExam() {
         new Date(subjectData.started_at).toLocaleTimeString('fr-FR');
 
     const content = document.getElementById('exam-content');
-    content.innerHTML = `
+    const raw = stripBaremeFromContent(subjectData.content || '');
+    const blocks = _parseExamBlocks(raw);
+    const questions = blocks.filter(b => b.type === 'qcm' || b.type === 'open');
+    const preamble  = blocks.find(b => b.type === 'text');
+
+    // Récupérer les réponses déjà sauvegardées
+    let savedQCM = {}; let savedTexte = {};
+    try {
+        const saved = JSON.parse(subjectData.current_answer || '{}');
+        savedQCM   = saved.qcm   || {};
+        savedTexte = saved.texte || {};
+    } catch(e) {}
+
+    // Section instructions (préambule uniquement)
+    let preambleHtml = '';
+    if (preamble) {
+        const txt = preamble.content.replace(/══+/g,'').replace(/──+/g,'').trim();
+        if (txt) preambleHtml = `
+        <div class="subject-card" style="border-left:4px solid var(--primary);margin-bottom:18px;">
+            <h2 style="margin-bottom:10px;"><i class="fas fa-info-circle" style="color:var(--primary)"></i> Instructions</h2>
+            <div style="font-size:14px;line-height:1.8;color:var(--dark);white-space:pre-wrap;">${escapeHtml(txt)}</div>
+        </div>`;
+    } else if (!questions.length) {
+        // Pas de questions parsées → afficher le texte brut complet
+        preambleHtml = `
         <div class="subject-card">
             <h2><i class="fas fa-file-alt" style="color:var(--primary)"></i> Sujet</h2>
-            <div class="content-text">${escapeHtml(stripBaremeFromContent(subjectData.content || ''))}</div>
-        </div>
+            <div class="content-text">${escapeHtml(raw)}</div>
+        </div>`;
+    }
+
+    // Si pas de questions détectées → textarea classique
+    if (!questions.length) {
+        content.innerHTML = preambleHtml + `
         <div class="answer-card">
             <h2><i class="fas fa-pen" style="color:var(--success)"></i> Votre réponse</h2>
             <textarea id="answer-area" class="answer-textarea"
@@ -1165,8 +1327,111 @@ function renderExam() {
                 <i class="fas fa-circle-notch fa-spin" style="display:none" id="save-spinner"></i>
                 <span id="save-text">Les réponses sont sauvegardées automatiquement</span>
             </div>
+        </div>`;
+        return;
+    }
+
+    // Barre de progression
+    const total = questions.length;
+    const progressHtml = `
+    <div style="margin-bottom:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="font-size:12px;color:#64748b;font-weight:600;"><i class="fas fa-tasks"></i> Progression</span>
+            <span id="p-prog-label" style="font-size:12px;color:#3b82f6;font-weight:700;">0 / ${total} répondu(es)</span>
         </div>
-    `;
+        <div style="height:7px;background:#e2e8f0;border-radius:99px;overflow:hidden;">
+            <div id="p-prog-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#10b981);border-radius:99px;transition:width .3s;"></div>
+        </div>
+    </div>`;
+
+    // Pastilles de navigation
+    const dots = questions.map((q, i) =>
+        `<span class="p-q-dot" data-qnum="${q.num}" data-idx="${i}" data-type="${q.type}" data-answered="0"
+            onclick="_pGotoQ(${i})" title="Q${i+1}"
+            style="width:24px;height:24px;border-radius:50%;background:rgba(255,255,255,.2);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;cursor:pointer;border:1.5px solid rgba(255,255,255,.4);transition:all .15s;flex-shrink:0;">${i+1}</span>`
+    ).join('');
+
+    const navHtml = `
+    <div style="background:#1e293b;border-radius:12px;padding:12px 16px;margin-bottom:16px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+            <button id="p-nav-prev" onclick="_pGotoQ(_pQIndex-1)" disabled
+                style="background:rgba(255,255,255,.1);border:none;color:#fff;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;">
+                <i class="fas fa-chevron-left"></i> Préc.
+            </button>
+            <span id="p-nav-counter" style="flex:1;text-align:center;font-size:14px;font-weight:700;color:#f1f5f9;">Question 1 / ${total}</span>
+            <button id="p-nav-next" onclick="_pGotoQ(_pQIndex+1)"
+                style="background:#3b82f6;border:none;color:#fff;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;">
+                Suiv. <i class="fas fa-chevron-right"></i>
+            </button>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;">${dots}</div>
+    </div>`;
+
+    // Rendu des blocs questions
+    let qHtml = '';
+    questions.forEach((block, qi) => {
+        const savedVal = block.type === 'qcm' ? (savedQCM[block.num] || '') : (savedTexte[block.num] || '');
+        const answered = block.type === 'qcm' ? !!savedVal : !!(savedVal && savedVal.trim());
+        const border = answered ? '#3b82f6' : '#e2e8f0';
+        const badge = block.type === 'qcm'
+            ? `<span style="background:#eff6ff;color:#3b82f6;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:700;">QCM</span>`
+            : `<span style="background:#ecfdf5;color:#065f46;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:700;">Ouvert</span>`;
+
+        qHtml += `<div class="p-q-block" id="pqblock-${block.num}" data-qnum="${block.num}" data-type="${block.type}"
+            style="display:${qi===0?'block':'none'};border:2px solid ${border};border-radius:16px;padding:22px 24px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.06);transition:border-color .2s;">
+            <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:16px;">
+                <span style="width:34px;height:34px;border-radius:50%;background:#0f172a;color:#fff;font-weight:800;font-size:15px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">${block.num}</span>
+                <div style="flex:1;">
+                    <div style="font-weight:700;font-size:15px;color:#0f172a;line-height:1.5;">${escapeHtml(block.text)}</div>
+                    ${block.extraLines && block.extraLines.length ? `<div style="font-size:14px;color:#475569;margin-top:6px;line-height:1.6;">${block.extraLines.map(escapeHtml).join('<br>')}</div>` : ''}
+                </div>
+                ${badge}
+            </div>`;
+
+        if (block.type === 'qcm') {
+            qHtml += `<div id="pchoices-${block.num}" style="display:flex;flex-direction:column;gap:10px;">`;
+            block.choices.forEach(c => {
+                const col = _P_COLORS[c.letter] || '#3b82f6';
+                const sel = savedVal === c.letter;
+                qHtml += `
+                <label class="p-choice" id="pchoice-${block.num}-${c.letter}"
+                    style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-radius:12px;border:2px solid ${sel?col:'#e2e8f0'};background:${sel?col+'18':'#fff'};cursor:pointer;transition:all .18s;user-select:none;box-shadow:0 1px 3px rgba(0,0,0,.05);"
+                    onclick="_pOnQCM('${block.num}','${c.letter}')">
+                    <input type="radio" name="pqcm_${block.num}" value="${c.letter}" ${sel?'checked':''} style="display:none;">
+                    <span class="p-letter" style="width:32px;height:32px;border-radius:50%;background:${sel?col:'#f1f5f9'};color:${sel?'#fff':'#64748b'};font-weight:700;font-size:14px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .18s;">${c.letter}</span>
+                    <span style="font-size:15px;color:#1e293b;line-height:1.5;flex:1;">${escapeHtml(c.text)}</span>
+                    <i class="fas fa-check-circle p-chk" style="color:${col};font-size:18px;flex-shrink:0;display:${sel?'inline':'none'};"></i>
+                </label>`;
+            });
+            qHtml += `</div>`;
+        } else {
+            qHtml += `
+            <textarea id="popen-${block.num}" data-qnum="${block.num}"
+                rows="5" placeholder="Votre réponse à la question ${block.num}…"
+                oninput="_pOnOpen(this)"
+                style="font-size:14px;font-family:inherit;resize:vertical;border-radius:8px;border:1.5px solid #e2e8f0;padding:12px 14px;width:100%;box-sizing:border-box;transition:border-color .2s;">${escapeHtml(savedVal)}</textarea>`;
+        }
+        qHtml += `</div>`;
+    });
+
+    content.innerHTML = preambleHtml + `
+    <div class="answer-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:12px;flex-wrap:wrap;">
+            <h2 style="margin:0;"><i class="fas fa-pen" style="color:var(--success)"></i> Vos Réponses</h2>
+            <div class="save-indicator" id="save-indicator" style="font-size:12px;">
+                <i class="fas fa-circle-notch fa-spin" style="display:none" id="save-spinner"></i>
+                <span id="save-text">Sauvegarde automatique</span>
+            </div>
+        </div>
+        ${progressHtml}${navHtml}${qHtml}
+        <p style="margin-top:16px;font-size:12px;color:#94a3b8;text-align:center;">
+            <i class="fas fa-save"></i> Sauvegarde automatique toutes les 30 secondes
+        </p>
+    </div>`;
+
+    _pQIndex = 0;
+    _pGotoQ(0);
+    _pUpdateProgress();
 }
 
 function escapeHtml(text) {
@@ -1890,31 +2155,22 @@ function startSaveInterval() {
 
 async function saveAnswers() {
     if (sessionEnded) return;
-    const area = document.getElementById('answer-area');
-    if (!area) return;
-
-    const indicator = document.getElementById('save-indicator');
-    const spinner   = document.getElementById('save-spinner');
-    const saveText  = document.getElementById('save-text');
-
-    if (indicator) indicator.className = 'save-indicator saving';
-    if (spinner)   spinner.style.display = 'inline-block';
-    if (saveText)  saveText.textContent = 'Sauvegarde en cours…';
-
+    const spinner  = document.getElementById('save-spinner');
+    const saveText = document.getElementById('save-text');
+    if (spinner)  spinner.style.display = 'inline-block';
+    if (saveText) saveText.textContent = 'Sauvegarde…';
     try {
-        const answers = JSON.stringify({ reponse: area.value });
+        const answers = _collectAnswers();
         await api(`/api/exam_attempts/${ATTEMPT_ID}/save`, {
             method: 'POST',
             body: JSON.stringify({ answers })
         });
         lastSaveTime = new Date();
-        if (indicator) indicator.className = 'save-indicator saved';
-        if (spinner)   spinner.style.display = 'none';
-        if (saveText)  saveText.textContent = 'Sauvegardé à ' + lastSaveTime.toLocaleTimeString('fr-FR');
+        if (spinner)  spinner.style.display = 'none';
+        if (saveText) saveText.textContent = 'Sauvegardé à ' + lastSaveTime.toLocaleTimeString('fr-FR');
     } catch(e) {
-        if (indicator) indicator.className = 'save-indicator';
-        if (spinner)   spinner.style.display = 'none';
-        if (saveText)  saveText.textContent = 'Erreur de sauvegarde';
+        if (spinner)  spinner.style.display = 'none';
+        if (saveText) saveText.textContent = 'Erreur de sauvegarde';
     }
 }
 
@@ -2187,17 +2443,13 @@ async function confirmSubmit() {
 async function doSubmit() {
     if (sessionEnded) return;
     sessionEnded = true;
-
-    const area = document.getElementById('answer-area');
-    const answers = JSON.stringify({ reponse: area ? area.value : '' });
-
+    const answers = _collectAnswers();
     try {
         await api(`/api/exam_attempts/${ATTEMPT_ID}/submit`, {
             method: 'POST',
             body: JSON.stringify({ answers })
         });
     } catch(e) {}
-
     await endSession(false);
     showModal('modal-submit');
 }
