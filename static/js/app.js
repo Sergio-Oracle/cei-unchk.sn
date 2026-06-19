@@ -3571,39 +3571,72 @@ async function loadSecurityReport() {
 }
 
 async function viewFaceReferencePhoto(attemptId) {
-    if (!attemptId) {
-        // La tentative n'est pas dans le résumé agrégé — chercher la dernière connue
-        showModal(`<div style="text-align:center;padding:24px;">
-            <i class="fas fa-camera" style="font-size:48px;color:#94a3b8;"></i>
-            <p style="color:#64748b;margin-top:12px;">Photo non disponible : identifiant de tentative inconnu dans ce résumé.<br>
-            Consultez le détail d'une tentative pour voir la photo.</p>
-        </div>`);
-        return;
-    }
     showLoader(true);
     try {
-        const res = await authenticatedFetch(`/api/exam_attempts/${attemptId}/face_reference`);
-        const data = await res.json();
-        showLoader(false);
-        if (data.image_data) {
-            const src = data.image_data.startsWith('data:') ? data.image_data : `data:image/jpeg;base64,${data.image_data}`;
-            showModal(`
-                <div style="text-align:center;">
-                    <h3 style="margin:0 0 16px;"><i class="fas fa-camera" style="color:#3b82f6;"></i> Photo de référence</h3>
-                    <img src="${src}" alt="Photo de référence" style="max-width:100%;border-radius:10px;border:2px solid #e2e8f0;box-shadow:0 4px 16px rgba(0,0,0,0.12);">
-                    <p style="color:#64748b;font-size:13px;margin-top:12px;">Capturée au démarrage de l'examen</p>
-                </div>
-            `, '500px');
+        if (attemptId) {
+            // Afficher la photo d'une tentative spécifique
+            const res = await authenticatedFetch(`/api/exam_attempts/${attemptId}/face_reference`);
+            const data = await res.json();
+            showLoader(false);
+            _showFacePhotoModal([{
+                student_name: data.student_name || '—',
+                exam_title:   data.exam_title || '—',
+                image_data:   data.image_data,
+                has_photo:    !!data.image_data
+            }]);
         } else {
-            showModal(`<div style="text-align:center;padding:24px;">
-                <i class="fas fa-camera-slash" style="font-size:48px;color:#94a3b8;"></i>
-                <p style="color:#64748b;margin-top:12px;">${data.message || 'Photo non disponible.'}</p>
-            </div>`);
+            // Depuis le résumé agrégé : charger toutes les photos du prof
+            const res = await authenticatedFetch('/api/security/face_references');
+            const data = await res.json();
+            showLoader(false);
+            _showFacePhotoModal(data.references || []);
         }
     } catch(e) {
         showLoader(false);
         showAlert('Erreur lors du chargement de la photo.', 'error');
     }
+}
+
+function _showFacePhotoModal(references) {
+    if (!references || references.length === 0) {
+        showModal(`<div style="text-align:center;padding:32px;">
+            <i class="fas fa-camera-slash" style="font-size:48px;color:#94a3b8;"></i>
+            <p style="color:#64748b;margin-top:16px;font-size:15px;">Aucune photo de référence disponible.</p>
+            <p style="color:#94a3b8;font-size:13px;">Les photos sont capturées automatiquement au démarrage de l'examen par la caméra de l'étudiant.</p>
+        </div>`, '480px');
+        return;
+    }
+
+    const cards = references.map(r => {
+        const imgHtml = r.has_photo && r.image_data
+            ? (() => {
+                const src = r.image_data.startsWith('data:') ? r.image_data : `data:image/jpeg;base64,${r.image_data}`;
+                return `<img src="${src}" alt="Photo de référence" style="width:100%;border-radius:8px;border:1px solid #e2e8f0;">`;
+              })()
+            : `<div style="width:100%;height:160px;background:#f1f5f9;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#94a3b8;flex-direction:column;gap:8px;">
+                <i class="fas fa-camera-slash" style="font-size:28px;"></i>
+                <span style="font-size:12px;">Photo non stockée</span>
+               </div>`;
+        return `
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;break-inside:avoid;">
+                ${imgHtml}
+                <div style="margin-top:10px;">
+                    <div style="font-weight:600;font-size:14px;color:#0f172a;">${r.student_name}</div>
+                    <div style="font-size:12px;color:#64748b;margin-top:2px;"><i class="fas fa-file-alt"></i> ${r.exam_title}</div>
+                    ${r.captured_at ? `<div style="font-size:11px;color:#94a3b8;margin-top:2px;"><i class="fas fa-clock"></i> ${new Date(r.captured_at).toLocaleString('fr-FR')}</div>` : ''}
+                </div>
+            </div>`;
+    }).join('');
+
+    showModal(`
+        <div>
+            <h3 style="margin:0 0 16px;"><i class="fas fa-camera" style="color:#3b82f6;"></i> Photos de référence</h3>
+            <p style="color:#64748b;font-size:13px;margin:0 0 16px;">${references.length} étudiant(s) — capturées au démarrage de l'examen</p>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;max-height:60vh;overflow-y:auto;padding:4px;">
+                ${cards}
+            </div>
+        </div>
+    `, '720px');
 }
 
 async function loadReclamations() {

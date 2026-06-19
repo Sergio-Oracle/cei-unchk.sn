@@ -5983,6 +5983,93 @@ def plagiarism_check(exam_id):
 # RAPPORT D'INTÉGRITÉ PDF
 # ============================================================================
 
+@app.route('/api/security/face_references', methods=['GET'])
+@jwt_required()
+def list_face_references():
+    """Liste toutes les photos de référence pour les examens du prof/admin."""
+    user_id = int(get_jwt_identity())
+    session = get_session()
+    try:
+        user = session.query(User).filter_by(id=user_id).first()
+        if not user or user.role not in [UserRole.ADMIN, UserRole.PROFESSOR]:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+
+        # Récupérer les tentatives concernées
+        if user.role == UserRole.PROFESSOR:
+            exam_ids = [e.id for e in session.query(OnlineExam).filter_by(created_by_id=user_id).all()]
+            if not exam_ids:
+                session.close()
+                return jsonify({'references': []})
+            attempts = session.query(ExamAttempt).filter(
+                ExamAttempt.exam_id.in_(exam_ids)
+            ).all()
+        else:
+            attempts = session.query(ExamAttempt).all()
+
+        attempt_ids = [a.id for a in attempts]
+        attempt_map = {a.id: a for a in attempts}
+
+        import json as _json
+        results = []
+
+        # Chercher dans CameraLog d'abord
+        cam_logs = session.query(CameraLog).filter(
+            CameraLog.attempt_id.in_(attempt_ids),
+            CameraLog.event_type == 'face_reference_captured'
+        ).all() if attempt_ids else []
+
+        cam_by_attempt = {}
+        for c in cam_logs:
+            if c.attempt_id not in cam_by_attempt:
+                cam_by_attempt[c.attempt_id] = c
+
+        # Chercher dans ExamActivityLog pour les events sans photo dans CameraLog
+        act_logs = session.query(ExamActivityLog).filter(
+            ExamActivityLog.attempt_id.in_(attempt_ids),
+            ExamActivityLog.event_type == 'face_reference_captured'
+        ).all() if attempt_ids else []
+
+        processed = set()
+        for log in act_logs:
+            if log.attempt_id in processed:
+                continue
+            processed.add(log.attempt_id)
+            att = attempt_map.get(log.attempt_id)
+            if not att:
+                continue
+            student = session.query(User).filter_by(id=att.student_id).first()
+            exam = session.query(OnlineExam).filter_by(id=att.exam_id).first()
+
+            image_data = None
+            cam = cam_by_attempt.get(log.attempt_id)
+            if cam and cam.image_data:
+                image_data = cam.image_data
+            else:
+                try:
+                    parsed = _json.loads(log.event_data or '{}')
+                    if isinstance(parsed, dict):
+                        image_data = parsed.get('image_data') or parsed.get('photo')
+                except Exception:
+                    pass
+
+            results.append({
+                'attempt_id':   att.id,
+                'student_name': student.full_name if student else '—',
+                'exam_title':   exam.title if exam else '—',
+                'captured_at':  log.timestamp.isoformat() if log.timestamp else None,
+                'image_data':   image_data,
+                'has_photo':    bool(image_data)
+            })
+
+        session.close()
+        return jsonify({'references': results})
+    except Exception as e:
+        try: session.rollback(); session.close()
+        except: pass
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/exam_attempts/<int:attempt_id>/face_reference', methods=['GET'])
 @jwt_required()
 def get_face_reference_photo(attempt_id):
