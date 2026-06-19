@@ -1147,7 +1147,9 @@ async function init() {
 
 // ─── Parsing des blocs QCM / Ouvertes ─────────────────────────
 function _parseExamBlocks(raw) {
-    const QNUM  = /^(\d{1,2})\s*[.)\-:]\s*(.*)/;
+    // Reconnaît : "1. ...", "1) ...", "Question 1 — ...", "Question 1. ..."
+    const QNUM  = /^(?:Question\s+)?(\d{1,2})\s*(?:[.)\-:]|—|–)\s*(.*)/i;
+    // Reconnaît : "a) ...", "A. ...", "a- ..."
     const CHOIX = /^([A-Fa-f])\s*[.)\-:]\s*(.*)/;
     const lines = raw.split('\n');
     const blocks = [];
