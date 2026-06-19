@@ -1602,9 +1602,12 @@ def get_professor_students():
             session.close()
             return jsonify({'ecs': [], 'students': [], 'total': 0})
 
-        # Étudiants inscrits dans ces UEs
-        enrollments = session.query(StudentUEEnrollment).filter(
-            StudentUEEnrollment.ue_id.in_(ue_ids)
+        # Étudiants inscrits dans ces UEs (uniquement role=STUDENT)
+        enrollments = session.query(StudentUEEnrollment).join(
+            User, StudentUEEnrollment.student_id == User.id
+        ).filter(
+            StudentUEEnrollment.ue_id.in_(ue_ids),
+            User.role == UserRole.STUDENT
         ).all()
 
         # Dédupliquer par étudiant, regrouper ses UEs
@@ -1614,7 +1617,7 @@ def get_professor_students():
 
         students_out = []
         for student_id_s, enrolled_ue_ids in student_ues.items():
-            student = session.query(User).filter_by(id=student_id_s).first()
+            student = session.query(User).filter_by(id=student_id_s, role=UserRole.STUDENT).first()
             if not student:
                 continue
             formation = session.query(Formation).filter_by(id=student.formation_id).first() if getattr(student, 'formation_id', None) else None
@@ -1978,7 +1981,8 @@ def create_user():
         existing = session.query(User).filter_by(email=data['email']).first()
         if existing:
             session.close()
-            return jsonify({'error': 'Cet email est déjà utilisé'}), 400
+            role_label = {'professor': 'un enseignant', 'student': 'un étudiant', 'admin': 'un administrateur', 'surveillant': 'un surveillant'}.get(existing.role.value, 'un utilisateur')
+            return jsonify({'error': f"Cet email est déjà utilisé par {role_label} ({existing.full_name}). Un email doit être unique dans le système."}), 400
 
         role_str = data.get('role', 'student').upper()
         if role_str not in ['STUDENT', 'PROFESSOR', 'ADMIN', 'SURVEILLANT']:
