@@ -1580,6 +1580,75 @@ def enroll_student_by_id(student_id):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/professor/my_students', methods=['GET'])
+@jwt_required()
+def get_professor_students():
+    """Retourne les étudiants inscrits dans les UEs des ECs du professeur connecté"""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if not user or user.role not in [UserRole.PROFESSOR, UserRole.ADMIN]:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+
+        # ECs du prof → UEs concernées
+        assignments = session.query(ECAssignment).filter_by(professor_id=user_id).all()
+        ec_ids = [a.ec_id for a in assignments]
+        ecs = session.query(EC).filter(EC.id.in_(ec_ids)).all() if ec_ids else []
+        ue_ids = list({ec.ue_id for ec in ecs if ec.ue_id})
+
+        if not ue_ids:
+            session.close()
+            return jsonify({'ecs': [], 'students': [], 'total': 0})
+
+        # Étudiants inscrits dans ces UEs
+        enrollments = session.query(StudentUEEnrollment).filter(
+            StudentUEEnrollment.ue_id.in_(ue_ids)
+        ).all()
+
+        # Dédupliquer par étudiant, regrouper ses UEs
+        student_ues = {}
+        for e in enrollments:
+            student_ues.setdefault(e.student_id, set()).add(e.ue_id)
+
+        students_out = []
+        for student_id_s, enrolled_ue_ids in student_ues.items():
+            student = session.query(User).filter_by(id=student_id_s).first()
+            if not student:
+                continue
+            formation = session.query(Formation).filter_by(id=student.formation_id).first() if getattr(student, 'formation_id', None) else None
+            # ECs du prof que suit cet étudiant
+            student_ecs = []
+            for ec in ecs:
+                if ec.ue_id in enrolled_ue_ids:
+                    ue = session.query(UE).filter_by(id=ec.ue_id).first()
+                    student_ecs.append({'ec_code': ec.code, 'ec_name': ec.name, 'ue_code': ue.code if ue else '—'})
+            students_out.append({
+                'id':             student.id,
+                'full_name':      student.full_name,
+                'email':          student.email,
+                'niveau':         student.niveau,
+                'formation_code': formation.code if formation else None,
+                'formation_name': formation.name if formation else None,
+                'ecs':            student_ecs,
+            })
+
+        students_out.sort(key=lambda x: x['full_name'])
+
+        # Infos sur les ECs du prof
+        ecs_out = []
+        for ec in ecs:
+            ue = session.query(UE).filter_by(id=ec.ue_id).first()
+            count = session.query(StudentUEEnrollment).filter_by(ue_id=ec.ue_id).count()
+            ecs_out.append({'ec_code': ec.code, 'ec_name': ec.name, 'ue_code': ue.code if ue else '—', 'student_count': count})
+
+        session.close()
+        return jsonify({'ecs': ecs_out, 'students': students_out, 'total': len(students_out)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/students/<int:student_id>/enrollments', methods=['GET'])
 @jwt_required()
 def get_student_enrollments(student_id):

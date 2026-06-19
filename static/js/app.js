@@ -772,6 +772,10 @@ function loadNavigation() {
         <button class="nav-tab" onclick="loadQuestionBank()">
             <i class="fas fa-database"></i> Banque questions
         </button>
+        <div class="nav-divider">Étudiants</div>
+        <button class="nav-tab" onclick="loadMyStudents()">
+            <i class="fas fa-users"></i> Mes Étudiants
+        </button>
         <div class="nav-divider">Résultats</div>
         <button class="nav-tab" onclick="loadViewResults()">
             <i class="fas fa-chart-bar"></i> ${t('nav.results')}
@@ -4778,6 +4782,147 @@ async function enrollStudentToUE(studentId) {
     } catch (error) {
         console.error('❌ Exception lors de l\'inscription:', error);
         showAlert(humanError(error), 'error');
+    } finally {
+        showLoader(false);
+    }
+}
+
+// ============================================================================
+// MES ÉTUDIANTS (vue professeur)
+// ============================================================================
+async function loadMyStudents() {
+    if (window.event && window.event.target) setActiveTab(window.event.target);
+    document.getElementById('main-content').innerHTML = '';
+    showLoader(true);
+    try {
+        const res  = await authenticatedFetch('/api/professor/my_students');
+        const data = await res.json();
+        if (!res.ok) { showAlert(data.error || 'Erreur', 'error'); return; }
+
+        const { ecs, students, total } = data;
+
+        // Résumé des ECs
+        const ecBadges = ecs.map(e => `
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 16px;">
+                <div style="font-weight:700;font-size:13px;color:#0f172a;">${e.ec_code} <span style="font-weight:400;color:#64748b;">— ${e.ec_name}</span></div>
+                <div style="font-size:12px;color:#64748b;margin-top:3px;">
+                    <i class="fas fa-layer-group" style="margin-right:4px;color:#94a3b8;"></i>UE ${e.ue_code}
+                    &nbsp;·&nbsp;
+                    <i class="fas fa-users" style="margin-right:4px;color:#94a3b8;"></i>${e.student_count} étudiant(s)
+                </div>
+            </div>`).join('');
+
+        // Filtre recherche
+        const searchId = 'my-students-search';
+
+        // Lignes étudiants
+        const rows = students.length === 0
+            ? `<tr><td colspan="4" style="padding:40px;text-align:center;color:#94a3b8;">
+                <i class="fas fa-user-slash" style="font-size:28px;display:block;margin-bottom:10px;"></i>
+                Aucun étudiant inscrit dans vos UEs.
+               </td></tr>`
+            : students.map(s => {
+                const initials = (s.full_name || s.email || '?').split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase();
+                const ecTags = s.ecs.map(e =>
+                    `<span style="display:inline-flex;align-items:center;gap:3px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;">${e.ec_code}</span>`
+                ).join(' ');
+                return `
+                <tr class="student-row" data-name="${(s.full_name||'').toLowerCase()}" data-email="${(s.email||'').toLowerCase()}"
+                    style="transition:background .15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
+                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;">
+                        <div style="display:flex;align-items:center;gap:9px;">
+                            <div style="width:32px;height:32px;border-radius:50%;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${initials}</div>
+                            <div>
+                                <div style="font-size:13px;font-weight:600;color:#0f172a;">${s.full_name}</div>
+                                <div style="font-size:11px;color:#94a3b8;">${s.email}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;">
+                        ${s.formation_code
+                            ? `<span style="background:#dcfce7;color:#15803d;border:1px solid #bbf7d0;border-radius:99px;padding:2px 9px;font-size:11px;font-weight:700;">${s.formation_code}</span>`
+                            : '<span style="color:#94a3b8;font-size:12px;">—</span>'}
+                    </td>
+                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;">
+                        <span style="font-size:12px;background:#f1f5f9;color:#475569;padding:2px 8px;border-radius:6px;">${s.niveau || '—'}</span>
+                    </td>
+                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;">
+                        <div style="display:flex;flex-wrap:wrap;gap:4px;">${ecTags}</div>
+                    </td>
+                </tr>`;
+            }).join('');
+
+        document.getElementById('main-content').innerHTML = `
+            <div style="margin-bottom:20px;">
+                <h2 style="margin:0 0 4px;font-size:20px;color:#0f172a;display:flex;align-items:center;gap:10px;">
+                    <i class="fas fa-users" style="color:#3b82f6;"></i> Mes Étudiants
+                </h2>
+                <p style="margin:0;color:#64748b;font-size:13px;">Étudiants inscrits dans les UEs de vos ECs</p>
+            </div>
+
+            ${ecs.length === 0 ? `
+            <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin-bottom:20px;display:flex;gap:12px;">
+                <i class="fas fa-triangle-exclamation" style="color:#f59e0b;font-size:18px;flex-shrink:0;"></i>
+                <p style="margin:0;font-size:13px;color:#92400e;">Vous n'avez aucun EC affecté. Contactez l'administrateur pour que des ECs vous soient assignés.</p>
+            </div>` : ''}
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-bottom:20px;">
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:12px;">
+                    <div style="width:38px;height:38px;border-radius:10px;background:#eff6ff;display:flex;align-items:center;justify-content:center;">
+                        <i class="fas fa-users" style="color:#3b82f6;"></i>
+                    </div>
+                    <div>
+                        <p style="margin:0;font-size:22px;font-weight:800;color:#0f172a;">${total}</p>
+                        <p style="margin:0;font-size:12px;color:#64748b;">Étudiants</p>
+                    </div>
+                </div>
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:12px;">
+                    <div style="width:38px;height:38px;border-radius:10px;background:#dcfce7;display:flex;align-items:center;justify-content:center;">
+                        <i class="fas fa-book-open" style="color:#10b981;"></i>
+                    </div>
+                    <div>
+                        <p style="margin:0;font-size:22px;font-weight:800;color:#0f172a;">${ecs.length}</p>
+                        <p style="margin:0;font-size:12px;color:#64748b;">ECs enseignés</p>
+                    </div>
+                </div>
+            </div>
+
+            ${ecs.length > 0 ? `
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;margin-bottom:20px;">
+                <h3 style="margin:0 0 12px;font-size:14px;font-weight:700;color:#0f172a;"><i class="fas fa-book-open" style="color:#10b981;margin-right:6px;"></i>Vos ECs</h3>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px;">${ecBadges}</div>
+            </div>` : ''}
+
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+                <div style="padding:12px 20px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <i class="fas fa-list" style="color:#64748b;font-size:13px;"></i>
+                        <h3 style="margin:0;font-size:15px;color:#0f172a;font-weight:600;">Liste</h3>
+                        <span style="background:#f1f5f9;color:#64748b;padding:1px 8px;border-radius:99px;font-size:12px;">${total}</span>
+                    </div>
+                    <input id="${searchId}" type="text" placeholder="Rechercher un étudiant…"
+                        style="padding:7px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;width:220px;"
+                        oninput="document.querySelectorAll('.student-row').forEach(r=>{
+                            const q=this.value.toLowerCase();
+                            r.style.display=(!q||r.dataset.name.includes(q)||r.dataset.email.includes(q))?'':'none';
+                        })">
+                </div>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead>
+                            <tr style="background:#f8fafc;">
+                                <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid #e2e8f0;">Étudiant</th>
+                                <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid #e2e8f0;">Formation</th>
+                                <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid #e2e8f0;">Niveau</th>
+                                <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid #e2e8f0;">ECs suivis</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>`;
+    } catch(e) {
+        showAlert('Erreur lors du chargement.', 'error');
     } finally {
         showLoader(false);
     }
