@@ -1580,6 +1580,89 @@ def enroll_student_by_id(student_id):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/admin/students/<int:student_id>/enrollments', methods=['GET'])
+@jwt_required()
+def get_student_enrollments(student_id):
+    """Retourne les inscriptions UE actuelles d'un étudiant avec infos Formation/Semestre"""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if user.role != UserRole.ADMIN:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        enrollments = session.query(StudentUEEnrollment).filter_by(student_id=student_id).all()
+        result = []
+        for e in enrollments:
+            ue = session.query(UE).filter_by(id=e.ue_id).first()
+            if not ue:
+                continue
+            sem = session.query(Semester).filter_by(id=ue.semester_id).first() if ue.semester_id else None
+            form = session.query(Formation).filter_by(id=sem.formation_id).first() if sem and sem.formation_id else None
+            result.append({
+                'enrollment_id': e.id,
+                'ue_id':         ue.id,
+                'ue_code':       ue.code,
+                'ue_name':       ue.name,
+                'semester_name': sem.name if sem else '—',
+                'formation_name': form.name if form else '—',
+                'formation_code': form.code if form else '—',
+            })
+        session.close()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/students/<int:student_id>/enroll_formation', methods=['POST'])
+@jwt_required()
+def enroll_student_formation(student_id):
+    """Inscrire un étudiant à toutes les UEs d'une Formation (logique LMD standard)"""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if user.role != UserRole.ADMIN:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        data = request.get_json() or {}
+        formation_id = data.get('formation_id')
+        if not formation_id:
+            session.close()
+            return jsonify({'error': 'formation_id requis'}), 400
+        student = session.query(User).filter_by(id=student_id, role=UserRole.STUDENT).first()
+        if not student:
+            session.close()
+            return jsonify({'error': 'Étudiant non trouvé'}), 404
+        formation = session.query(Formation).filter_by(id=formation_id).first()
+        if not formation:
+            session.close()
+            return jsonify({'error': 'Formation non trouvée'}), 404
+        semesters = session.query(Semester).filter_by(formation_id=formation_id).all()
+        added, already = 0, 0
+        for sem in semesters:
+            ues = session.query(UE).filter_by(semester_id=sem.id).all()
+            for ue in ues:
+                existing = session.query(StudentUEEnrollment).filter_by(
+                    student_id=student_id, ue_id=ue.id
+                ).first()
+                if existing:
+                    already += 1
+                else:
+                    session.add(StudentUEEnrollment(student_id=student_id, ue_id=ue.id))
+                    added += 1
+        session.commit()
+        session.close()
+        return jsonify({
+            'success': True,
+            'added': added,
+            'already': already,
+            'message': f'{added} UE(s) ajoutée(s), {already} déjà inscrite(s).'
+        }), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/student_enrollments/<int:enrollment_id>', methods=['DELETE'])
 @jwt_required()
 def remove_student_enrollment(enrollment_id):

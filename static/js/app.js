@@ -4415,7 +4415,7 @@ async function confirmMultiAssign(ecId) {
 }
 
 // ============================================================================
-// INSCRIPTIONS UE
+// INSCRIPTIONS UE — Logique LMD standard
 // ============================================================================
 async function loadStudentEnrollments() {
     if (window.event && window.event.target) setActiveTab(window.event.target);
@@ -4429,84 +4429,88 @@ async function loadStudentEnrollments() {
         const formations = await formationsRes.json();
         const students   = await studentsRes.json();
 
-        let ues = [];
-        for (const formation of formations) {
+        // Charger toutes les UEs (groupées par formation)
+        let totalUes = 0;
+        for (const f of formations) {
             try {
-                const semRes  = await authenticatedFetch(`/api/formations/${formation.id}/semesters`);
-                const semesters = await semRes.json();
-                for (const semester of semesters) {
-                    try {
-                        const ueRes  = await authenticatedFetch(`/api/semesters/${semester.id}/ues`);
-                        const ueData = await ueRes.json();
-                        ues = ues.concat(ueData);
-                    } catch (e) {}
+                const semRes = await authenticatedFetch(`/api/formations/${f.id}/semesters`);
+                f.semesters  = await semRes.json();
+                for (const sem of f.semesters) {
+                    const ueRes = await authenticatedFetch(`/api/semesters/${sem.id}/ues`);
+                    sem.ues     = await ueRes.json();
+                    totalUes   += sem.ues.length;
                 }
-            } catch (e) {}
+            } catch(e) { f.semesters = []; }
         }
 
-        const ueOptions = '<option value="">— Sélectionner une UE —</option>'
-            + ues.map(u => `<option value="${u.id}">${u.code} — ${u.name}</option>`).join('');
+        // Charger les inscriptions actuelles de chaque étudiant
+        const enrollmentsByStudent = {};
+        await Promise.all(students.map(async s => {
+            try {
+                const r = await authenticatedFetch(`/api/admin/students/${s.id}/enrollments`);
+                enrollmentsByStudent[s.id] = r.ok ? await r.json() : [];
+            } catch(e) { enrollmentsByStudent[s.id] = []; }
+        }));
 
-        const rows = students.length === 0
-            ? `<tr><td colspan="4" style="padding:40px;text-align:center;color:#94a3b8;">
-                   <i class="fas fa-inbox" style="font-size:32px;display:block;margin-bottom:10px;"></i>
-                   Aucun étudiant enregistré. Créez d'abord des comptes étudiants.
-               </td></tr>`
-            : students.map(student => {
-                const initials = student.full_name.split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase();
+        const cards = students.length === 0
+            ? `<div style="padding:48px;text-align:center;color:#94a3b8;">
+                <i class="fas fa-inbox" style="font-size:36px;display:block;margin-bottom:12px;"></i>
+                Aucun étudiant enregistré. Créez d'abord des comptes étudiants.
+               </div>`
+            : students.map(s => {
+                const initials = s.full_name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+                const enrollments = enrollmentsByStudent[s.id] || [];
+
+                // Tags des UEs inscrites
+                const ueTagsHtml = enrollments.length === 0
+                    ? `<span style="font-size:12px;color:#94a3b8;font-style:italic;">Aucune inscription</span>`
+                    : enrollments.map(e => `
+                        <span style="display:inline-flex;align-items:center;gap:4px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;">
+                            <i class="fas fa-layer-group" style="font-size:9px;"></i>
+                            ${e.ue_code}
+                            <button onclick="unenrollStudent(${e.enrollment_id}, ${s.id})"
+                                style="background:none;border:none;cursor:pointer;color:#94a3b8;padding:0 0 0 2px;line-height:1;font-size:11px;"
+                                title="Désinscrire de ${e.ue_name}">&#x2715;</button>
+                        </span>`).join('');
+
                 return `
-                    <tr style="transition:background .15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
-                        <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;">
-                            <div style="display:flex;align-items:center;gap:9px;">
-                                <div style="width:32px;height:32px;border-radius:50%;background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${initials}</div>
-                                <span style="font-size:13px;font-weight:600;color:#0f172a;">${student.full_name}</span>
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px 18px;display:flex;align-items:flex-start;gap:14px;">
+                    <div style="width:40px;height:40px;border-radius:50%;background:#dbeafe;color:#1d4ed8;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${initials}</div>
+                    <div style="flex:1;min-width:0;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+                            <div>
+                                <div style="font-size:14px;font-weight:700;color:#0f172a;">${s.full_name}</div>
+                                <div style="font-size:12px;color:#64748b;"><i class="fas fa-envelope" style="font-size:10px;margin-right:3px;"></i>${s.email}</div>
                             </div>
-                        </td>
-                        <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;">
-                            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#64748b;">
-                                <i class="fas fa-envelope" style="font-size:11px;color:#94a3b8;"></i>
-                                ${student.email}
-                            </div>
-                        </td>
-                        <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;">
-                            <select id="student-ue-${student.id}" class="student-ue-select"
-                                style="font-size:13px;padding:7px 10px;border:1.5px solid #e2e8f0;border-radius:7px;background:#fff;color:#334155;width:100%;min-width:200px;transition:border-color .2s;"
-                                onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'">
-                                ${ueOptions}
-                            </select>
-                        </td>
-                        <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;">
-                            <div style="display:flex;gap:6px;">
-                                <button onclick="enrollStudentToUE(${student.id})"
-                                    style="display:inline-flex;align-items:center;gap:5px;padding:7px 13px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .15s;"
-                                    onmouseover="this.style.background='#dbeafe'" onmouseout="this.style.background='#eff6ff'">
-                                    <i class="fas fa-circle-plus"></i> Inscrire (UE)
-                                </button>
-                                <!-- #2 — inscription directe par EC -->
-                                <button onclick="showEnrollByECModal(${student.id}, '${(student.full_name||'').replace(/'/g,"\\'")}')"
-                                    style="display:inline-flex;align-items:center;gap:5px;padding:7px 10px;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .15s;"
-                                    title="Inscrire à un EC spécifique">
-                                    <i class="fas fa-book-open"></i> EC
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
-                `;
+                            <button onclick="showManageEnrollmentsModal(${s.id}, '${(s.full_name||'').replace(/'/g,"\\'")}', window._formationsCache)"
+                                style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:#3b82f6;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                                <i class="fas fa-pen-to-square"></i> Gérer les inscriptions
+                            </button>
+                        </div>
+                        <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
+                            <span style="font-size:11px;color:#64748b;font-weight:600;margin-right:2px;">UEs :</span>
+                            ${ueTagsHtml}
+                        </div>
+                    </div>
+                </div>`;
             }).join('');
 
+        // Mettre en cache les formations pour la modale
+        window._formationsCache = formations;
+
+        const enrolledCount = students.filter(s => (enrollmentsByStudent[s.id]||[]).length > 0).length;
+
         document.getElementById('main-content').innerHTML = `
-            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px;">
-                <div>
-                    <h2 style="margin:0;font-size:20px;color:#0f172a;display:flex;align-items:center;gap:10px;">
-                        <i class="fas fa-user-graduate" style="color:#3b82f6;"></i> Inscriptions UE des Étudiants
-                    </h2>
-                    <p style="margin:4px 0 0;color:#64748b;font-size:13px;">Inscrivez les étudiants aux Unités d'Enseignement</p>
-                </div>
+            <div style="margin-bottom:20px;">
+                <h2 style="margin:0 0 4px;font-size:20px;color:#0f172a;display:flex;align-items:center;gap:10px;">
+                    <i class="fas fa-user-graduate" style="color:#3b82f6;"></i> Inscriptions UE des Étudiants
+                </h2>
+                <p style="margin:0;color:#64748b;font-size:13px;">Gérez les inscriptions des étudiants aux Unités d'Enseignement selon la maquette pédagogique</p>
             </div>
 
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px;">
                 <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px 20px;display:flex;align-items:center;gap:14px;">
-                    <div style="width:40px;height:40px;border-radius:10px;background:#eff6ff;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <div style="width:40px;height:40px;border-radius:10px;background:#eff6ff;display:flex;align-items:center;justify-content:center;">
                         <i class="fas fa-users" style="color:#3b82f6;font-size:16px;"></i>
                     </div>
                     <div>
@@ -4515,44 +4519,38 @@ async function loadStudentEnrollments() {
                     </div>
                 </div>
                 <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px 20px;display:flex;align-items:center;gap:14px;">
-                    <div style="width:40px;height:40px;border-radius:10px;background:#dcfce7;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <div style="width:40px;height:40px;border-radius:10px;background:#dcfce7;display:flex;align-items:center;justify-content:center;">
                         <i class="fas fa-layer-group" style="color:#10b981;font-size:16px;"></i>
                     </div>
                     <div>
-                        <p style="margin:0;font-size:22px;font-weight:800;color:#0f172a;">${ues.length}</p>
+                        <p style="margin:0;font-size:22px;font-weight:800;color:#0f172a;">${totalUes}</p>
                         <p style="margin:0;font-size:12px;color:#64748b;">UEs disponibles</p>
+                    </div>
+                </div>
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px 20px;display:flex;align-items:center;gap:14px;">
+                    <div style="width:40px;height:40px;border-radius:10px;background:#fef3c7;display:flex;align-items:center;justify-content:center;">
+                        <i class="fas fa-user-check" style="color:#f59e0b;font-size:16px;"></i>
+                    </div>
+                    <div>
+                        <p style="margin:0;font-size:22px;font-weight:800;color:#0f172a;">${enrolledCount}</p>
+                        <p style="margin:0;font-size:12px;color:#64748b;">Étudiants inscrits</p>
                     </div>
                 </div>
             </div>
 
-            ${ues.length === 0 ? `
+            ${formations.length === 0 ? `
             <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:14px 18px;margin-bottom:20px;display:flex;align-items:flex-start;gap:12px;">
-                <i class="fas fa-triangle-exclamation" style="color:#f59e0b;font-size:18px;flex-shrink:0;margin-top:1px;"></i>
-                <div>
-                    <p style="margin:0;font-weight:600;font-size:13px;color:#92400e;">Aucune UE disponible</p>
-                    <p style="margin:4px 0 0;font-size:12px;color:#78350f;">Créez d'abord des formations, des semestres et des UEs dans l'onglet <strong>Maquette Pédagogique</strong> avant d'inscrire des étudiants.</p>
-                </div>
+                <i class="fas fa-triangle-exclamation" style="color:#f59e0b;font-size:18px;flex-shrink:0;"></i>
+                <p style="margin:0;font-size:13px;color:#92400e;">Créez d'abord des formations et des UEs dans <strong>Maquette Pédagogique</strong> avant d'inscrire des étudiants.</p>
             </div>` : ''}
 
             <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
                 <div style="padding:14px 20px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:8px;">
                     <i class="fas fa-list" style="color:#64748b;font-size:13px;"></i>
                     <h3 style="margin:0;font-size:15px;color:#0f172a;font-weight:600;">Liste des étudiants</h3>
-                    <span style="background:#f1f5f9;color:#64748b;padding:1px 8px;border-radius:99px;font-size:12px;margin-left:4px;">${students.length}</span>
+                    <span style="background:#f1f5f9;color:#64748b;padding:1px 8px;border-radius:99px;font-size:12px;">${students.length}</span>
                 </div>
-                <div style="overflow-x:auto;">
-                    <table style="width:100%;border-collapse:collapse;">
-                        <thead>
-                            <tr style="background:#f8fafc;">
-                                <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid #e2e8f0;">Étudiant</th>
-                                <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid #e2e8f0;">Email</th>
-                                <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid #e2e8f0;">Choisir une UE</th>
-                                <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid #e2e8f0;">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>${rows}</tbody>
-                    </table>
-                </div>
+                <div style="display:flex;flex-direction:column;gap:1px;padding:12px;">${cards}</div>
             </div>
         `;
     } catch (error) {
@@ -4562,15 +4560,126 @@ async function loadStudentEnrollments() {
     }
 }
 
+async function showManageEnrollmentsModal(studentId, studentName, formations) {
+    showLoader(true);
+    try {
+        const r = await authenticatedFetch(`/api/admin/students/${studentId}/enrollments`);
+        const currentEnrollments = r.ok ? await r.json() : [];
+        const enrolledUeIds = new Set(currentEnrollments.map(e => e.ue_id));
+
+        const formationBlocks = (formations || []).map(f => {
+            const allUes = (f.semesters || []).flatMap(s => (s.ues || []).map(u => ({...u, semester_name: s.name})));
+            if (!allUes.length) return '';
+            const allChecked = allUes.every(u => enrolledUeIds.has(u.id));
+            const checkboxes = allUes.map(u => `
+                <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px;color:#334155;${enrolledUeIds.has(u.id)?'background:#eff6ff;':''}">
+                    <input type="checkbox" data-ue-id="${u.id}" data-formation-id="${f.id}"
+                        ${enrolledUeIds.has(u.id) ? 'checked' : ''}
+                        style="width:15px;height:15px;accent-color:#3b82f6;flex-shrink:0;"
+                        onchange="this.closest('label').style.background=this.checked?'#eff6ff':''">
+                    <span>
+                        <strong style="color:#0f172a;">${u.code}</strong>
+                        <span style="color:#64748b;"> — ${u.name}</span>
+                        <span style="font-size:11px;color:#94a3b8;"> (${u.semester_name})</span>
+                    </span>
+                </label>`).join('');
+
+            return `
+                <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:10px;">
+                    <div style="background:#f8fafc;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;">
+                        <div>
+                            <span style="font-weight:700;font-size:13px;color:#0f172a;">${f.code}</span>
+                            <span style="font-size:12px;color:#64748b;margin-left:6px;">— ${f.name}</span>
+                        </div>
+                        <button onclick="enrollStudentFormation(${studentId}, ${f.id})"
+                            style="font-size:11px;padding:5px 10px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;white-space:nowrap;">
+                            <i class="fas fa-bolt"></i> Inscrire à toutes les UEs
+                        </button>
+                    </div>
+                    <div style="padding:8px 10px;display:flex;flex-direction:column;gap:2px;">${checkboxes}</div>
+                </div>`;
+        }).join('');
+
+        showModal(`
+            <div>
+                <h3 style="margin:0 0 4px;font-size:17px;font-weight:700;"><i class="fas fa-pen-to-square" style="color:#3b82f6;margin-right:8px;"></i>Inscriptions de ${studentName}</h3>
+                <p style="margin:0 0 14px;font-size:13px;color:#64748b;">Cochez les UEs auxquelles l'étudiant doit être inscrit. Ou utilisez <strong>Inscrire à toutes les UEs</strong> pour inscrire à toute une formation d'un clic.</p>
+                <div style="max-height:55vh;overflow-y:auto;padding-right:4px;">${formationBlocks || '<p style="color:#94a3b8;text-align:center;">Aucune formation disponible.</p>'}</div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;padding-top:14px;border-top:1px solid #f1f5f9;">
+                    <button class="btn btn-secondary" onclick="closeModal()">Annuler</button>
+                    <button class="btn btn-primary" onclick="saveEnrollmentChanges(${studentId})"><i class="fas fa-save"></i> Enregistrer</button>
+                </div>
+            </div>`, '600px');
+    } finally { showLoader(false); }
+}
+
+async function saveEnrollmentChanges(studentId) {
+    const checkboxes = document.querySelectorAll('#modal-container input[type=checkbox][data-ue-id]');
+    showLoader(true);
+    let added = 0, removed = 0, errors = 0;
+
+    // Récupérer l'état actuel
+    const r = await authenticatedFetch(`/api/admin/students/${studentId}/enrollments`);
+    const current = r.ok ? await r.json() : [];
+    const enrolledMap = {}; // ue_id → enrollment_id
+    current.forEach(e => { enrolledMap[e.ue_id] = e.enrollment_id; });
+
+    for (const cb of checkboxes) {
+        const ueId   = parseInt(cb.dataset.ueId);
+        const checked = cb.checked;
+        const wasEnrolled = !!enrolledMap[ueId];
+
+        if (checked && !wasEnrolled) {
+            const res = await authenticatedFetch(`/api/admin/students/${studentId}/enroll`, {
+                method: 'POST', body: JSON.stringify({ ue_id: ueId })
+            });
+            if (res.ok) added++; else errors++;
+        } else if (!checked && wasEnrolled) {
+            const res = await authenticatedFetch(`/api/admin/student_enrollments/${enrolledMap[ueId]}`, {
+                method: 'DELETE'
+            });
+            if (res.ok) removed++; else errors++;
+        }
+    }
+    showLoader(false);
+    closeModal();
+    const parts = [];
+    if (added)   parts.push(`${added} ajoutée(s)`);
+    if (removed) parts.push(`${removed} supprimée(s)`);
+    if (errors)  parts.push(`${errors} erreur(s)`);
+    showAlert(parts.length ? parts.join(', ') + '.' : 'Aucun changement.', errors ? 'warning' : 'success');
+    loadStudentEnrollments();
+}
+
+async function enrollStudentFormation(studentId, formationId) {
+    showLoader(true);
+    const res = await authenticatedFetch(`/api/admin/students/${studentId}/enroll_formation`, {
+        method: 'POST', body: JSON.stringify({ formation_id: formationId })
+    });
+    const data = await res.json();
+    showLoader(false);
+    if (data.success) {
+        showAlert(data.message, 'success');
+        closeModal();
+        loadStudentEnrollments();
+    } else {
+        showAlert(data.error || 'Erreur.', 'error');
+    }
+}
+
+async function unenrollStudent(enrollmentId, studentId) {
+    if (!confirm('Désinscrire cet étudiant de cette UE ?')) return;
+    showLoader(true);
+    const res = await authenticatedFetch(`/api/admin/student_enrollments/${enrollmentId}`, { method: 'DELETE' });
+    showLoader(false);
+    if (res.ok) { showAlert('Désinscription effectuée.', 'success'); loadStudentEnrollments(); }
+    else showAlert('Erreur lors de la désinscription.', 'error');
+}
+
+// Conservé pour compatibilité avec d'autres appels éventuels
 async function enrollStudentToUE(studentId) {
-    console.log('🔍 DEBUG enrollStudentToUE appelée avec studentId:', studentId);
-    
-    // Validation robuste du select
     const select = document.getElementById(`student-ue-${studentId}`);
-    console.log('🔍 DEBUG select element:', select);
-    
     if (!select) {
-        console.error('❌ Élément select introuvable pour student-ue-' + studentId);
         showAlert('Erreur technique : impossible de lire la sélection UE. Veuillez actualiser la page.', 'error');
         return;
     }
@@ -4632,43 +4741,6 @@ async function enrollStudentToUE(studentId) {
     } finally {
         showLoader(false);
     }
-}
-// #2 — inscription directe par EC
-async function showEnrollByECModal(studentId, studentName) {
-    showLoader(true);
-    try {
-        const res = await authenticatedFetch('/api/ecs');
-        const ecs = res.ok ? await res.json() : [];
-        const options = ecs.map(e => `<option value="${e.id}">[${e.code}] ${e.name} — ${e.ue_code||''}</option>`).join('');
-        showModal(`
-            <h3 style="margin:0 0 4px;font-size:18px;font-weight:700;"><i class="fas fa-book-open" style="color:#10b981;margin-right:8px;"></i>Inscription directe par EC</h3>
-            <p style="margin:0 0 14px;font-size:13px;color:#64748b;">Étudiant : <strong>${studentName}</strong><br>
-            L'étudiant sera inscrit à l'UE parente de l'EC sélectionné.</p>
-            <div class="form-group" style="margin-bottom:14px;">
-                <label class="form-label">Sélectionner l'EC</label>
-                <input type="text" id="ec-enroll-filter" placeholder="Filtrer par code ou nom…"
-                    style="width:100%;padding:7px 10px;border:1.5px solid #e2e8f0;border-radius:7px;font-size:13px;margin-bottom:6px;box-sizing:border-box;"
-                    oninput="[...document.getElementById('ec-enroll-select').options].forEach(o=>o.hidden=!!this.value&&!o.text.toLowerCase().includes(this.value.toLowerCase()))">
-                <select id="ec-enroll-select" class="form-select" size="5">${options}</select>
-            </div>
-            <div style="display:flex;gap:10px;justify-content:flex-end;">
-                <button class="btn btn-secondary" onclick="closeModal()">Annuler</button>
-                <button class="btn btn-success" onclick="confirmEnrollByEC(${studentId})"><i class="fas fa-check"></i> Inscrire</button>
-            </div>`, '460px');
-    } finally { showLoader(false); }
-}
-
-async function confirmEnrollByEC(studentId) {
-    const select = document.getElementById('ec-enroll-select');
-    const ecId   = select && select.value;
-    if (!ecId) { showAlert('Veuillez sélectionner un EC.', 'warning'); return; }
-    const res = await authenticatedFetch('/api/admin/enroll_student_ec', {
-        method: 'POST', body: JSON.stringify({ student_id: studentId, ec_id: ecId })
-    });
-    const data = await res.json();
-    closeModal();
-    if (data.success) { showAlert(data.message || 'Inscription effectuée.', 'success'); loadStudentEnrollments(); }
-    else showAlert(data.error || 'Erreur lors de l\'inscription.', 'error');
 }
 
 // ============================================================================
