@@ -7791,7 +7791,8 @@ function _parseExamBlocks(raw) {
             }
         }
 
-        const type = choices.length >= 2 ? 'qcm' : 'open';
+        const hasPoints = choices.length >= 1 && choices.some(c => /\(\d+\s*pts?\)/i.test(c.text));
+        const type = hasPoints ? 'subopen' : (choices.length >= 2 ? 'qcm' : 'open');
         blocks.push({ type, num, text: qText, extraLines, choices });
     }
 
@@ -7898,6 +7899,38 @@ function _renderExamAnswerSection(blocks, savedData) {
         if (block.type === 'text') {
             const txt = _esc(block.content);
             qHtml += `<div style="padding:10px 14px;background:#f8fafc;border-left:3px solid #94a3b8;border-radius:4px;margin-bottom:14px;font-size:13px;color:#475569;white-space:pre-wrap;font-family:monospace;">${txt}</div>`;
+            return;
+        }
+
+        // sous-questions ouvertes (ex: "A) Définissez... (1 pt)")
+        if (block.type === 'subopen') {
+            const anyAnswered = block.choices.some(c => !!(texteData[block.num + '_' + c.letter] || '').trim());
+            qHtml += `<div class="exam-q-block" id="qblock-${block.num}" data-qnum="${block.num}" data-type="subopen"
+                style="border:2px solid ${anyAnswered?'#10b981':'#e2e8f0'};border-radius:16px;padding:22px 24px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.06);transition:border-color .2s;">
+                <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:16px;">
+                    <span style="width:34px;height:34px;border-radius:50%;background:#0f172a;color:#fff;font-weight:800;font-size:15px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">${block.num}</span>
+                    <div style="flex:1;">
+                        <div style="font-weight:700;font-size:15px;color:#0f172a;line-height:1.5;">${_esc(block.text)}</div>
+                        ${block.extraLines && block.extraLines.length ? `<div style="font-size:14px;color:#475569;margin-top:6px;">${block.extraLines.map(_esc).join('<br>')}</div>` : ''}
+                    </div>
+                    <span style="background:#fef9c3;color:#854d0e;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:700;">Ouvert</span>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:14px;">`;
+            block.choices.forEach(c => {
+                const subKey = block.num + '_' + c.letter;
+                const subVal = texteData[subKey] || '';
+                qHtml += `
+                <div style="border:1.5px solid #e2e8f0;border-radius:10px;padding:14px 16px;background:#f8fafc;">
+                    <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;">
+                        <span style="width:26px;height:26px;border-radius:50%;background:#e0e7ff;color:#3730a3;font-weight:700;font-size:13px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">${c.letter}</span>
+                        <span style="font-size:14px;font-weight:600;color:#1e293b;line-height:1.5;">${_esc(c.text)}</span>
+                    </div>
+                    <textarea data-subkey="${subKey}" rows="3" placeholder="Votre réponse…"
+                        oninput="_onSubOpenInput(this)"
+                        style="font-size:14px;font-family:inherit;resize:vertical;border-radius:8px;border:1.5px solid #e2e8f0;padding:10px 12px;width:100%;box-sizing:border-box;">${_esc(subVal)}</textarea>
+                </div>`;
+            });
+            qHtml += `</div></div>`;
             return;
         }
 
@@ -8071,6 +8104,23 @@ function _onOpenInput(textarea) {
     _syncExamAnswers();
 }
 
+// Saisie dans une sous-question ouverte
+function _onSubOpenInput(textarea) {
+    const subKey = textarea.dataset.subkey;
+    const qNum = subKey ? subKey.split('_')[0] : null;
+    if (qNum) {
+        const qBlock = document.getElementById(`qblock-${qNum}`);
+        if (qBlock) {
+            const anyFilled = qBlock.querySelectorAll('textarea[data-subkey]');
+            const filled = [...anyFilled].some(ta => ta.value.trim());
+            qBlock.style.borderColor = filled ? '#10b981' : '#e2e8f0';
+        }
+    }
+    _updateExamProgress();
+    _updateExamNavUI();
+    _syncExamAnswers();
+}
+
 function _updateExamProgress() {
     const qblocks = document.querySelectorAll('.exam-q-block');
     const total   = qblocks.length;
@@ -8081,6 +8131,8 @@ function _updateExamProgress() {
         const type = block.dataset.type;
         if (type === 'qcm') {
             if (document.querySelector(`input[name="qcm_q${qNum}"]:checked`)) answered++;
+        } else if (type === 'subopen') {
+            if ([...block.querySelectorAll('textarea[data-subkey]')].some(ta => ta.value.trim())) answered++;
         } else {
             const ta = document.getElementById(`open-q-${qNum}`);
             if (ta && ta.value.trim()) answered++;
@@ -8119,6 +8171,10 @@ function collectExamAnswers() {
             } else {
                 lines.push(`Q${qNum}: (sans réponse)`);
             }
+        } else if (type === 'subopen') {
+            block.querySelectorAll('textarea[data-subkey]').forEach(ta => {
+                if (ta.value.trim()) texte[ta.dataset.subkey] = ta.value;
+            });
         } else {
             const ta  = document.getElementById(`open-q-${qNum}`);
             const val = ta ? ta.value.trim() : '';

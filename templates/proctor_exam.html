@@ -1172,7 +1172,10 @@ function _parseExamBlocks(raw) {
             else if (choices.length === 0) { extraLines.push(nl); i++; }
             else break;
         }
-        blocks.push({ type: choices.length >= 2 ? 'qcm' : 'open', num, text: qText, extraLines, choices });
+        // Si les "choix" contiennent des points (ex: "(1 pt)", "(2 pts)") → sous-questions ouvertes
+        const hasPoints = choices.length >= 1 && choices.some(c => /\(\d+\s*pts?\)/i.test(c.text));
+        const type = hasPoints ? 'subopen' : (choices.length >= 2 ? 'qcm' : 'open');
+        blocks.push({ type, num, text: qText, extraLines, choices });
     }
     return blocks;
 }
@@ -1239,6 +1242,10 @@ function _pUpdateProgress() {
         const qNum = b.dataset.qnum;
         const type = b.dataset.type;
         if (type === 'qcm') { if (document.querySelector(`input[name="pqcm_${qNum}"]:checked`)) answered++; }
+        else if (type === 'subopen') {
+            const tas = b.querySelectorAll('textarea[data-subkey]');
+            if (tas.length && [...tas].some(ta => ta.value.trim())) answered++;
+        }
         else { const ta = document.getElementById(`popen-${qNum}`); if (ta && ta.value.trim()) answered++; }
     });
     const total = blocks.length;
@@ -1271,6 +1278,11 @@ function _collectAnswers() {
         if (type === 'qcm') {
             const checked = document.querySelector(`input[name="pqcm_${qNum}"]:checked`);
             if (checked) qcm[qNum] = checked.value;
+        } else if (type === 'subopen') {
+            // Sous-questions ouvertes : clé = "num_LETTRE"
+            b.querySelectorAll('textarea[data-subkey]').forEach(ta => {
+                if (ta.value.trim()) texte[ta.dataset.subkey] = ta.value;
+            });
         } else {
             const ta = document.getElementById(`popen-${qNum}`);
             if (ta && ta.value.trim()) texte[qNum] = ta.value;
@@ -1404,6 +1416,25 @@ function renderExam() {
                     <span style="font-size:15px;color:#1e293b;line-height:1.5;flex:1;">${escapeHtml(c.text)}</span>
                     <i class="fas fa-check-circle p-chk" style="color:${col};font-size:18px;flex-shrink:0;display:${sel?'inline':'none'};"></i>
                 </label>`;
+            });
+            qHtml += `</div>`;
+        } else if (block.type === 'subopen') {
+            // Sous-questions ouvertes : chaque lettre a son propre textarea
+            qHtml += `<div style="display:flex;flex-direction:column;gap:14px;">`;
+            block.choices.forEach(c => {
+                const subKey = block.num + '_' + c.letter;
+                const subVal = savedTexte[subKey] || '';
+                qHtml += `
+                <div style="border:1.5px solid #e2e8f0;border-radius:10px;padding:14px 16px;background:#f8fafc;">
+                    <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px;">
+                        <span style="width:26px;height:26px;border-radius:50%;background:#e0e7ff;color:#3730a3;font-weight:700;font-size:13px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">${c.letter}</span>
+                        <span style="font-size:14px;font-weight:600;color:#1e293b;line-height:1.5;">${escapeHtml(c.text)}</span>
+                    </div>
+                    <textarea id="popen-${block.num}-${c.letter}" data-qnum="${block.num}" data-subkey="${subKey}"
+                        rows="3" placeholder="Votre réponse…"
+                        oninput="_pOnOpen(this)"
+                        style="font-size:14px;font-family:inherit;resize:vertical;border-radius:8px;border:1.5px solid #e2e8f0;padding:10px 12px;width:100%;box-sizing:border-box;transition:border-color .2s;">${escapeHtml(subVal)}</textarea>
+                </div>`;
             });
             qHtml += `</div>`;
         } else {
