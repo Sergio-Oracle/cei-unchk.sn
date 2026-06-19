@@ -3444,7 +3444,23 @@ async function loadSecurityReport() {
                 multiple_faces:         'fa-users',
                 face_reference_captured:'fa-camera',
                 screen_share_stopped:   'fa-desktop',
-                student_message:        'fa-comment'
+                student_message:        'fa-comment',
+                devtools_attempt:       'fa-code',
+                face_absent:            'fa-user-slash'
+            };
+            const evtLabels = {
+                no_face_detected:       'Visage non détecté',
+                window_blur:            'Changement de fenêtre',
+                tab_switch:             'Changement d\'onglet',
+                copy_attempt:           'Tentative de copie',
+                paste_attempt:          'Tentative de collage',
+                right_click:            'Clic droit détecté',
+                multiple_faces:         'Plusieurs visages détectés',
+                face_reference_captured:'Photo de référence capturée',
+                screen_share_stopped:   'Partage d\'écran arrêté',
+                student_message:        'Message étudiant',
+                devtools_attempt:       'Console développeur ouverte',
+                face_absent:            'Visage absent'
             };
             const riskColors = {
                 no_face_detected: '#f59e0b',
@@ -3457,7 +3473,7 @@ async function loadSecurityReport() {
             const ic = icons[e.event] || 'fa-circle';
             const cl = riskColors[e.event] || '#94a3b8';
             return `<tr>
-                <td style="padding:10px 14px;font-size:13px;"><i class="fas ${ic}" style="color:${cl};margin-right:8px;"></i>${e.event}</td>
+                <td style="padding:10px 14px;font-size:13px;"><i class="fas ${ic}" style="color:${cl};margin-right:8px;"></i>${evtLabels[e.event] || e.event}</td>
                 <td style="padding:10px 14px;font-size:13px;font-weight:700;">${e.count}</td>
             </tr>`;
         }).join('');
@@ -9639,16 +9655,20 @@ async function viewExamIncidents(examId) {
         } else {
             data.incidents.forEach(incident => {
                 const eventTypeLabels = {
-                    'tab_switch': '🚨 Changement de fenêtre',
-                    'copy_attempt': '📋 Tentative de copie',
-                    'paste_attempt': '📋 Tentative de collage',
-                    'right_click': '🖱️ Clic droit',
-                    'devtools_attempt': '🔧 Console développeur',
-                    'face_absent': '👤 Visage absent',
-                    'no_face_detected': '👤 Visage absent',
-                    'multiple_faces': '👥 Plusieurs visages'
+                    'tab_switch':              '🔀 Changement d\'onglet',
+                    'window_blur':             '🪟 Changement de fenêtre',
+                    'copy_attempt':            '📋 Tentative de copie',
+                    'paste_attempt':           '📋 Tentative de collage',
+                    'right_click':             '🖱️ Clic droit détecté',
+                    'devtools_attempt':        '🔧 Console développeur ouverte',
+                    'face_absent':             '👤 Visage absent',
+                    'no_face_detected':        '👤 Visage non détecté',
+                    'multiple_faces':          '👥 Plusieurs visages détectés',
+                    'face_reference_captured': '📷 Photo de référence capturée',
+                    'screen_share_stopped':    '🖥️ Partage d\'écran arrêté',
+                    'student_message':         '💬 Message étudiant'
                 };
-                
+
                 const eventLabel = eventTypeLabels[incident.event_type] || incident.event_type;
                 const severityColor = incident.severity === 'high' ? '#ef4444' : '#f59e0b';
                 
@@ -10308,19 +10328,23 @@ async function showProfessorNotifications() {
             
             incidents.forEach(incident => {
                 const eventTypeLabels = {
-                    'tab_switch': 'Changement de fenêtre',
-                    'copy_attempt': 'Tentative de copie',
-                    'paste_attempt': 'Tentative de collage',
-                    'right_click': 'Clic droit',
-                    'devtools_attempt': 'Console développeur',
-                    'face_absent': 'Visage absent',
-                    'no_face_detected': 'Visage absent',
-                    'multiple_faces': 'Plusieurs visages'
+                    'tab_switch':              'Changement d\'onglet',
+                    'window_blur':             'Changement de fenêtre',
+                    'copy_attempt':            'Tentative de copie',
+                    'paste_attempt':           'Tentative de collage',
+                    'right_click':             'Clic droit détecté',
+                    'devtools_attempt':        'Console développeur ouverte',
+                    'face_absent':             'Visage absent',
+                    'no_face_detected':        'Visage non détecté',
+                    'multiple_faces':          'Plusieurs visages détectés',
+                    'face_reference_captured': 'Photo de référence capturée',
+                    'screen_share_stopped':    'Partage d\'écran arrêté',
+                    'student_message':         'Message étudiant'
                 };
-                
+
                 const eventLabel = eventTypeLabels[incident.event_type] || incident.event_type;
                 const severityColor = incident.severity === 'high' ? '#ef4444' : '#f59e0b';
-                
+
                 const timeAgo = getTimeAgo(new Date(incident.timestamp));
                 
                 html += `
