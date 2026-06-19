@@ -12373,10 +12373,13 @@ async function distributeProctors(examId) {
             showAlert(`✅ ${d.message}\n\n${summary}${modeNote}`, 'success');
             closeModal();
             showManageProctorsModal(examId);
+        } else if (d.warning) {
+            showAlert(`ℹ️ ${d.warning}`, 'info');
+            closeModal();
+            showManageProctorsModal(examId);
         } else {
             let msg = d.error || 'Erreur lors de la répartition.';
             if (msg.includes('Aucun surveillant')) msg = 'Ajoutez d\'abord au moins un surveillant à cet examen avant de lancer la répartition.';
-            if (msg.includes('Aucun étudiant')) msg = 'Aucun étudiant n\'a encore composé cet examen. La répartition se fait une fois l\'examen actif.';
             showAlert(msg, 'error');
         }
     } catch (e) {

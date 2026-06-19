@@ -986,7 +986,18 @@ def distribute_proctors(exam_id):
                     enrolled_students = [e.student for e in enrollments if e.student]
 
             if not enrolled_students:
-                return jsonify({'error': 'Aucun étudiant inscrit à l\'UE de cet examen. Vérifiez les inscriptions.'}), 400
+                # Pas de UE liée au sujet — répartition en attente (lazy)
+                # Les assignments seront créés dynamiquement quand les étudiants démarrent
+                subject_info = f"sujet n°{exam.subject_id}" if exam.subject_id else "sujet inconnu"
+                session.close()
+                return jsonify({
+                    'warning': f'Aucun étudiant pré-inscrit trouvé ({subject_info} sans EC/UE lié). '
+                               'Les surveillants sont bien affectés : la répartition des étudiants '
+                               'se fera automatiquement dès qu\'ils démarrent l\'examen.',
+                    'mode': 'lazy',
+                    'proctors': nb_proctors,
+                    'total_students': 0
+                }), 200
 
             # Supprimer les anciennes pré-affectations
             session.query(ProctorAssignment).filter_by(exam_id=exam_id).delete()
