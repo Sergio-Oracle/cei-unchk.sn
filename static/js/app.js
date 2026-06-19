@@ -7916,13 +7916,14 @@ function _renderExamAnswerSection(blocks, savedData) {
                 : `<span style="background:#ecfdf5;color:#065f46;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:700;margin-left:8px;vertical-align:middle;">Ouvert</span>`;
 
         qHtml += `<div class="exam-q-block" id="qblock-${block.num}" data-qnum="${block.num}" data-type="${effectiveType}"
-            style="border:1.5px solid ${border};border-radius:12px;padding:16px 18px;margin-bottom:12px;background:#fff;transition:border-color .2s;">
-            <div style="font-weight:700;font-size:14px;color:#0f172a;margin-bottom:8px;">
-                Question ${block.num} ${badge}
+            style="border:2px solid ${border};border-radius:16px;padding:22px 24px;margin-bottom:12px;background:#fff;transition:border-color .2s;box-shadow:0 2px 12px rgba(0,0,0,.06);">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+                <span style="width:34px;height:34px;border-radius:50%;background:#0f172a;color:#fff;font-weight:800;font-size:15px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">${block.num}</span>
+                <span style="font-weight:700;font-size:15px;color:#0f172a;flex:1;line-height:1.5;">${_esc(block.text)}</span>
+                ${badge}
             </div>
-            <div style="font-size:14px;color:#1e293b;margin-bottom:${block.extraLines && block.extraLines.length ? '4px' : '12px'};line-height:1.6;">${_esc(block.text)}</div>
             ${block.extraLines && block.extraLines.length
-                ? `<div style="font-size:14px;color:#1e293b;margin-bottom:12px;line-height:1.6;">${block.extraLines.map(_esc).join('<br>')}</div>`
+                ? `<div style="font-size:14px;color:#475569;margin-bottom:14px;line-height:1.6;padding-left:44px;">${block.extraLines.map(_esc).join('<br>')}</div>`
                 : ''}`;
 
         if (isVF) {
@@ -7941,19 +7942,22 @@ function _renderExamAnswerSection(blocks, savedData) {
             });
             qHtml += `</div>`;
         } else if (isQCM) {
-            qHtml += `<div class="qcm-choices-group" id="choices-${block.num}">`;
+            qHtml += `<div class="qcm-choices-group" id="choices-${block.num}" style="display:flex;flex-direction:column;gap:10px;">`;
             block.choices.forEach(c => {
-                const sel    = savedVal === c.letter;
-                const bdr    = sel ? '#3b82f6' : '#e2e8f0';
-                const bg     = sel ? '#eff6ff' : '#f8fafc';
+                const sel = savedVal === c.letter;
+                const colors = { A:'#3b82f6', B:'#10b981', C:'#f59e0b', D:'#ef4444', E:'#8b5cf6', F:'#06b6d4' };
+                const col = colors[c.letter] || '#3b82f6';
+                const bdr = sel ? col : '#e2e8f0';
+                const bg  = sel ? col + '15' : '#fff';
                 qHtml += `
                 <label class="qcm-choice-label" id="choice-lbl-${block.num}-${c.letter}"
-                    style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:8px;border:1.5px solid ${bdr};background:${bg};cursor:pointer;margin-bottom:6px;transition:all .15s;user-select:none;"
+                    style="display:flex;align-items:center;gap:14px;padding:14px 18px;border-radius:12px;border:2px solid ${bdr};background:${bg};cursor:pointer;transition:all .18s;user-select:none;box-shadow:0 1px 3px rgba(0,0,0,.06);"
                     onclick="_onQCMSelect('${block.num}','${c.letter}')">
                     <input type="radio" name="qcm_q${block.num}" value="${c.letter}" ${sel ? 'checked' : ''}
-                        style="width:16px;height:16px;accent-color:#3b82f6;flex-shrink:0;pointer-events:none;">
-                    <span style="width:26px;height:26px;border-radius:6px;background:#e0e7ff;color:#3730a3;font-weight:700;font-size:13px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">${c.letter}</span>
-                    <span style="font-size:14px;color:#1e293b;">${_esc(c.text)}</span>
+                        style="display:none;">
+                    <span style="width:32px;height:32px;border-radius:50%;background:${sel ? col : '#f1f5f9'};color:${sel ? '#fff' : '#64748b'};font-weight:700;font-size:14px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .18s;">${c.letter}</span>
+                    <span style="font-size:15px;color:#1e293b;line-height:1.5;flex:1;">${_esc(c.text)}</span>
+                    ${sel ? `<i class="fas fa-check-circle" style="color:${col};font-size:18px;flex-shrink:0;"></i>` : ''}
                 </label>`;
             });
             qHtml += `</div>`;
@@ -8019,19 +8023,42 @@ function _renderExamAnswerSection(blocks, savedData) {
 }
 
 // Sélection d'une option QCM
+const _QCM_COLORS = { A:'#3b82f6', B:'#10b981', C:'#f59e0b', D:'#ef4444', E:'#8b5cf6', F:'#06b6d4' };
 function _onQCMSelect(qNum, letter) {
     const radio = document.querySelector(`input[name="qcm_q${qNum}"][value="${letter}"]`);
     if (radio) radio.checked = true;
     document.querySelectorAll(`#choices-${qNum} .qcm-choice-label`).forEach(lbl => {
+        const ltrMatch = lbl.id.match(/choice-lbl-\d+-([A-F])/);
+        const ltr = ltrMatch ? ltrMatch[1] : null;
+        const col = _QCM_COLORS[ltr] || '#3b82f6';
         const sel = lbl.id === `choice-lbl-${qNum}-${letter}`;
-        lbl.style.borderColor = sel ? '#3b82f6' : '#e2e8f0';
-        lbl.style.background  = sel ? '#eff6ff' : '#f8fafc';
+        lbl.style.borderColor = sel ? col : '#e2e8f0';
+        lbl.style.background  = sel ? col + '15' : '#fff';
+        // Mettre à jour le cercle de lettre et l'icône check
+        const circle = lbl.querySelector('span:first-of-type');
+        if (circle) { circle.style.background = sel ? col : '#f1f5f9'; circle.style.color = sel ? '#fff' : '#64748b'; }
+        // Supprimer ou ajouter l'icône check
+        const existing = lbl.querySelector('.fa-check-circle');
+        if (sel && !existing) {
+            const ico = document.createElement('i');
+            ico.className = 'fas fa-check-circle';
+            ico.style.cssText = `color:${col};font-size:18px;flex-shrink:0;`;
+            lbl.appendChild(ico);
+        } else if (!sel && existing) {
+            existing.remove();
+        }
     });
     const qBlock = document.getElementById(`qblock-${qNum}`);
     if (qBlock) qBlock.style.borderColor = '#3b82f6';
     _updateExamProgress();
     _updateExamNavUI();
     _syncExamAnswers();
+    // Avancer automatiquement à la question suivante après 400ms
+    setTimeout(() => {
+        const qblocks = document.querySelectorAll('.exam-q-block');
+        const cur = Array.from(qblocks).findIndex(b => b.id === `qblock-${qNum}`);
+        if (cur >= 0 && cur < qblocks.length - 1) _gotoExamQuestion(cur + 1);
+    }, 400);
 }
 
 // Saisie dans un textarea ouvert
@@ -8496,22 +8523,27 @@ async function showExamCompositionInterface(examId, attempt) {
                 </div>
             </div>
             
-            ${exam.subject_content && exam.subject_content.content ? `
-            <div class="card" style="margin-bottom: 24px; border-left: 4px solid #3b82f6;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
-                    <h3 style="margin:0;"><i class="fas fa-file-alt" style="color:#3b82f6;"></i> Sujet de l'Examen</h3>
-                    <div style="display:flex;gap:8px;align-items:center;">
-                        <span style="background:#eff6ff;color:#3b82f6;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600;">
-                            <i class="fas fa-graduation-cap"></i> ${exam.subject_content.title}
-                        </span>
-                        <button onclick="document.getElementById('subject-content-body').style.display = document.getElementById('subject-content-body').style.display === 'none' ? 'block' : 'none'" style="background:none;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;color:#64748b;">
-                            <i class="fas fa-compress-alt"></i> Réduire/Agrandir
-                        </button>
+            ${(() => {
+                if (!exam.subject_content || !exam.subject_content.content) return '';
+                const _raw = stripBaremeFromContent(exam.subject_content.content);
+                const _blks = _parseExamBlocks(_raw);
+                const _preamble = _blks.find(b => b.type === 'text');
+                const _hasQ = _blks.some(b => b.type === 'qcm' || b.type === 'open');
+                // Si des questions existent, n'afficher que les instructions (préambule), pas les questions brutes
+                if (_hasQ && !_preamble) return '';
+                const _body = _hasQ
+                    ? (_preamble ? _preamble.content.replace(/══+/g,'').replace(/──+/g,'').trim() : '')
+                    : _raw;
+                if (!_body) return '';
+                return `<div class="card" style="margin-bottom:20px;border-left:4px solid #3b82f6;">
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                        <i class="fas fa-info-circle" style="color:#3b82f6;font-size:18px;"></i>
+                        <h3 style="margin:0;font-size:15px;color:#1e40af;">Instructions</h3>
+                        <span style="background:#eff6ff;color:#3b82f6;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:600;margin-left:auto;">${exam.subject_content.title}</span>
                     </div>
-                </div>
-                <div id="subject-content-body" style="padding:16px;background:#f8fafc;border-radius:8px;font-size:14px;line-height:1.8;white-space:pre-wrap;font-family:monospace;border:1px solid #e2e8f0;max-height:500px;overflow-y:auto;">${stripBaremeFromContent(exam.subject_content.content)}</div>
-            </div>
-            ` : ''}
+                    <div style="font-size:14px;line-height:1.8;color:#374151;white-space:pre-wrap;">${_esc(_body)}</div>
+                </div>`;
+            })()}
 
             <div class="card">
                 <div class="card-header">
