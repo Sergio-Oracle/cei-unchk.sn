@@ -1584,7 +1584,21 @@ async function captureReferenceDescriptor() {
     _consMismatch = 0;
     _consNoFace   = 0;
 
-    logProctoringEvent('face_reference_captured', `Référence capturée (${TARGET} frames)`);
+    // Capturer une photo de référence (screenshot de la vidéo)
+    let refPhotoB64 = null;
+    try {
+        const snapCanvas = document.createElement('canvas');
+        const snapVideo  = document.getElementById('local-video');
+        snapCanvas.width  = snapVideo.videoWidth  || 320;
+        snapCanvas.height = snapVideo.videoHeight || 240;
+        snapCanvas.getContext('2d').drawImage(snapVideo, 0, 0, snapCanvas.width, snapCanvas.height);
+        refPhotoB64 = snapCanvas.toDataURL('image/jpeg', 0.7).split(',')[1]; // base64 sans le préfixe
+    } catch(e) { console.warn('[FaceRef] Erreur capture photo:', e); }
+
+    logProctoringEvent('face_reference_captured', JSON.stringify({
+        label:      `Référence capturée (${TARGET} frames)`,
+        image_data: refPhotoB64
+    }));
     if (el) { el.className = 'face-overlay ok'; el.innerHTML = '<i class="fas fa-user-check"></i> Identifié'; }
     _showFaceGuide('Votre visage a été enregistré — vous êtes identifié !', 'ok');
     setTimeout(() => { if (el && el.className.includes('ok')) el.innerHTML = '<i class="fas fa-check"></i> OK'; }, 4000);
