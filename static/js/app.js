@@ -4493,9 +4493,9 @@ async function loadStudentEnrollments() {
                             ${ueTagsHtml}
                         </div>
                     </div>
-                    <button onclick="showSetFormationModal(${s.id}, '${(s.full_name||s.email||'').replace(/'/g,"\\'")}', window._formationsCache)"
+                    <button onclick="showSetFormationModal(${s.id}, '${(s.full_name||s.email||'').replace(/'/g,"\\'")}', window._formationsCache, ${s.formation_id || 'null'})"
                         style="display:inline-flex;align-items:center;gap:6px;padding:7px 13px;background:${s.formation_id ? '#f8fafc' : '#3b82f6'};color:${s.formation_id ? '#334155' : '#fff'};border:1px solid ${s.formation_id ? '#e2e8f0' : '#3b82f6'};border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;">
-                        <i class="fas fa-${s.formation_id ? 'pen' : 'plus'}"></i> ${s.formation_id ? 'Changer' : 'Affecter'}
+                        <i class="fas fa-pen-to-square"></i> Gérer les inscriptions
                     </button>
                 </div>`;
             }).join('');
@@ -4565,55 +4565,142 @@ async function loadStudentEnrollments() {
     }
 }
 
-function showSetFormationModal(studentId, studentName, formations) {
-    const formationCards = (formations || []).map(f => {
-        const ueCount = (f.semesters || []).reduce((n, s) => n + (s.ues || []).length, 0);
-        const semCount = (f.semesters || []).length;
-        return `
-            <div onclick="confirmSetFormation(${studentId}, ${f.id}, '${f.name.replace(/'/g,"\\'")}')"
-                style="border:1.5px solid #e2e8f0;border-radius:10px;padding:14px 16px;cursor:pointer;transition:all .15s;"
-                onmouseover="this.style.borderColor='#3b82f6';this.style.background='#eff6ff';"
-                onmouseout="this.style.borderColor='#e2e8f0';this.style.background='#fff';">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                    <span style="font-weight:700;font-size:14px;color:#0f172a;">${f.code}</span>
-                    <span style="font-size:11px;background:#f1f5f9;color:#64748b;padding:2px 8px;border-radius:99px;">${f.level || ''}</span>
+async function showSetFormationModal(studentId, studentName, formations, currentFormationId) {
+    showLoader(true);
+    try {
+        const r = await authenticatedFetch(`/api/admin/students/${studentId}/enrollments`);
+        const currentEnrollments = r.ok ? await r.json() : [];
+        const enrolledUeIds = new Set(currentEnrollments.map(e => e.ue_id));
+
+        const formationBlocks = (formations || []).map(f => {
+            const isPrimary = f.id === currentFormationId;
+            const allUes = (f.semesters || []).flatMap(s => (s.ues || []).map(u => ({...u, sem: s.name})));
+            const enrolledCount = allUes.filter(u => enrolledUeIds.has(u.id)).length;
+
+            const ueRows = allUes.map(u => {
+                const checked = enrolledUeIds.has(u.id);
+                return `
+                <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:13px;${checked?'background:#eff6ff;':''}">
+                    <input type="checkbox" data-ue-id="${u.id}"
+                        ${checked ? 'checked' : ''}
+                        style="width:15px;height:15px;accent-color:#3b82f6;flex-shrink:0;"
+                        onchange="this.closest('label').style.background=this.checked?'#eff6ff':''">
+                    <span><strong>${u.code}</strong> <span style="color:#64748b;">— ${u.name}</span> <span style="color:#94a3b8;font-size:11px;">(${u.sem})</span></span>
+                </label>`;
+            }).join('');
+
+            return `
+            <div style="border:1.5px solid ${isPrimary ? '#3b82f6' : '#e2e8f0'};border-radius:10px;overflow:hidden;margin-bottom:10px;">
+                <div style="background:${isPrimary ? '#eff6ff' : '#f8fafc'};padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        ${isPrimary ? '<span style="font-size:10px;background:#3b82f6;color:#fff;padding:2px 7px;border-radius:99px;font-weight:700;">PRINCIPALE</span>' : ''}
+                        <span style="font-weight:700;font-size:13px;color:#0f172a;">${f.code}</span>
+                        <span style="font-size:12px;color:#64748b;">— ${f.name}</span>
+                        <span style="font-size:11px;color:#94a3b8;">${enrolledCount}/${allUes.length} UE(s) inscrites</span>
+                    </div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        ${!isPrimary ? `<button onclick="setAsPrimary(${studentId},${f.id})"
+                            style="font-size:11px;padding:4px 9px;background:#fff;color:#3b82f6;border:1px solid #bfdbfe;border-radius:6px;cursor:pointer;font-weight:600;white-space:nowrap;">
+                            <i class="fas fa-star"></i> Définir principale</button>` : ''}
+                        <button onclick="bulkCheckFormation(${f.id}, true)"
+                            style="font-size:11px;padding:4px 9px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;white-space:nowrap;">
+                            <i class="fas fa-check-double"></i> Tout cocher</button>
+                        <button onclick="bulkCheckFormation(${f.id}, false)"
+                            style="font-size:11px;padding:4px 9px;background:#fff;color:#ef4444;border:1px solid #fecaca;border-radius:6px;cursor:pointer;font-weight:600;white-space:nowrap;">
+                            <i class="fas fa-xmark"></i> Tout décocher</button>
+                    </div>
                 </div>
-                <div style="font-size:13px;color:#475569;margin-bottom:8px;">${f.name}</div>
-                <div style="display:flex;gap:10px;">
-                    <span style="font-size:11px;color:#64748b;"><i class="fas fa-calendar" style="margin-right:3px;"></i>${semCount} semestre(s)</span>
-                    <span style="font-size:11px;color:#64748b;"><i class="fas fa-layer-group" style="margin-right:3px;"></i>${ueCount} UE(s)</span>
+                <div data-formation-id="${f.id}" style="padding:6px 10px;display:flex;flex-direction:column;gap:1px;">
+                    ${ueRows || '<p style="color:#94a3b8;font-size:12px;padding:4px 8px;">Aucune UE dans cette formation.</p>'}
                 </div>
             </div>`;
-    }).join('');
+        }).join('');
 
-    showModal(`
-        <div>
-            <h3 style="margin:0 0 4px;font-size:17px;font-weight:700;">
-                <i class="fas fa-graduation-cap" style="color:#3b82f6;margin-right:8px;"></i>Affecter à une Formation
-            </h3>
-            <p style="margin:0 0 16px;font-size:13px;color:#64748b;">
-                Étudiant : <strong>${studentName}</strong><br>
-                <span style="color:#ef4444;font-weight:600;">⚠ Les inscriptions UE actuelles seront remplacées</span> par celles de la formation choisie.
-            </p>
-            <div style="display:flex;flex-direction:column;gap:8px;max-height:55vh;overflow-y:auto;">
-                ${formationCards || '<p style="color:#94a3b8;text-align:center;">Aucune formation disponible.</p>'}
-            </div>
-            <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f1f5f9;text-align:right;">
-                <button class="btn btn-secondary" onclick="closeModal()">Annuler</button>
-            </div>
-        </div>`, '500px');
+        showModal(`
+            <div>
+                <h3 style="margin:0 0 4px;font-size:17px;font-weight:700;">
+                    <i class="fas fa-user-graduate" style="color:#3b82f6;margin-right:8px;"></i>Inscriptions de ${studentName}
+                </h3>
+                <p style="margin:0 0 14px;font-size:13px;color:#64748b;">
+                    Cochez les UEs souhaitées. Un étudiant en <strong>double cursus</strong> peut avoir des UEs de plusieurs formations.
+                    La formation <span style="background:#3b82f6;color:#fff;padding:1px 6px;border-radius:4px;font-size:11px;">PRINCIPALE</span> détermine son cursus principal.
+                </p>
+                <div style="max-height:55vh;overflow-y:auto;padding-right:4px;">${formationBlocks || '<p style="color:#94a3b8;text-align:center;">Aucune formation disponible.</p>'}</div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;padding-top:14px;border-top:1px solid #f1f5f9;">
+                    <button class="btn btn-secondary" onclick="closeModal()">Annuler</button>
+                    <button class="btn btn-primary" onclick="saveEnrollmentChanges(${studentId})"><i class="fas fa-save"></i> Enregistrer</button>
+                </div>
+            </div>`, '640px');
+    } finally { showLoader(false); }
 }
 
-async function confirmSetFormation(studentId, formationId, formationName) {
-    closeModal();
+function bulkCheckFormation(formationId, check) {
+    const container = document.querySelector(`[data-formation-id="${formationId}"]`);
+    if (!container) return;
+    container.querySelectorAll('input[type=checkbox]').forEach(cb => {
+        cb.checked = check;
+        cb.closest('label').style.background = check ? '#eff6ff' : '';
+    });
+}
+
+async function setAsPrimary(studentId, formationId) {
     showLoader(true);
     const res = await authenticatedFetch(`/api/admin/students/${studentId}/set_formation`, {
-        method: 'POST', body: JSON.stringify({ formation_id: formationId })
+        method: 'POST', body: JSON.stringify({ formation_id: formationId, replace_all: false })
+    });
+    const data = await res.json();
+    showLoader(false);
+    if (data.success) {
+        showAlert(`Formation principale mise à jour : ${data.formation_name}`, 'success');
+        closeModal();
+        loadStudentEnrollments();
+    } else {
+        showAlert(data.error || 'Erreur.', 'error');
+    }
+}
+
+async function saveEnrollmentChanges(studentId) {
+    const checkboxes = document.querySelectorAll('#modal-container input[type=checkbox][data-ue-id]');
+    showLoader(true);
+    let added = 0, removed = 0, errors = 0;
+
+    const r = await authenticatedFetch(`/api/admin/students/${studentId}/enrollments`);
+    const current = r.ok ? await r.json() : [];
+    const enrolledMap = {};
+    current.forEach(e => { enrolledMap[e.ue_id] = e.enrollment_id; });
+
+    for (const cb of checkboxes) {
+        const ueId = parseInt(cb.dataset.ueId);
+        if (cb.checked && !enrolledMap[ueId]) {
+            const res = await authenticatedFetch(`/api/admin/students/${studentId}/enroll`, {
+                method: 'POST', body: JSON.stringify({ ue_id: ueId })
+            });
+            if (res.ok) added++; else errors++;
+        } else if (!cb.checked && enrolledMap[ueId]) {
+            const res = await authenticatedFetch(`/api/admin/student_enrollments/${enrolledMap[ueId]}`, { method: 'DELETE' });
+            if (res.ok) removed++; else errors++;
+        }
+    }
+    showLoader(false);
+    closeModal();
+    const parts = [];
+    if (added)   parts.push(`${added} UE(s) ajoutée(s)`);
+    if (removed) parts.push(`${removed} UE(s) retirée(s)`);
+    if (errors)  parts.push(`${errors} erreur(s)`);
+    showAlert(parts.length ? parts.join(', ') + '.' : 'Aucun changement.', errors ? 'warning' : 'success');
+    loadStudentEnrollments();
+}
+
+async function confirmSetFormation(studentId, formationId, replaceAll) {
+    showLoader(true);
+    const res = await authenticatedFetch(`/api/admin/students/${studentId}/set_formation`, {
+        method: 'POST', body: JSON.stringify({ formation_id: formationId, replace_all: replaceAll })
     });
     const data = await res.json();
     showLoader(false);
     if (data.success) {
         showAlert(data.message, 'success');
+        closeModal();
         loadStudentEnrollments();
     } else {
         showAlert(data.error || 'Erreur.', 'error');

@@ -1617,7 +1617,7 @@ def get_student_enrollments(student_id):
 @app.route('/api/admin/students/<int:student_id>/set_formation', methods=['POST'])
 @jwt_required()
 def set_student_formation(student_id):
-    """Affecter un étudiant à une Formation — remplace toutes ses inscriptions UE existantes (logique LMD)"""
+    """Définir la formation principale d'un étudiant et ajouter ses UEs (sans supprimer les UEs d'autres formations — double cursus)"""
     try:
         user_id = int(get_jwt_identity())
         session = get_session()
@@ -1627,6 +1627,7 @@ def set_student_formation(student_id):
             return jsonify({'error': 'Accès non autorisé'}), 403
         data = request.get_json() or {}
         formation_id = data.get('formation_id')
+        replace_all  = data.get('replace_all', False)  # True = supprimer autres formations (réaffectation simple)
         if not formation_id:
             session.close()
             return jsonify({'error': 'formation_id requis'}), 400
@@ -1639,19 +1640,22 @@ def set_student_formation(student_id):
             session.close()
             return jsonify({'error': 'Formation non trouvée'}), 404
 
-        # Supprimer TOUTES les inscriptions UE actuelles
-        session.query(StudentUEEnrollment).filter_by(student_id=student_id).delete()
+        if replace_all:
+            # Réaffectation simple : supprimer toutes les UEs existantes
+            session.query(StudentUEEnrollment).filter_by(student_id=student_id).delete()
 
-        # Inscrire à toutes les UEs de la formation choisie
+        # Inscrire à toutes les UEs de la formation choisie (sans doublon)
         semesters = session.query(Semester).filter_by(formation_id=formation_id).all()
         added = 0
         for sem in semesters:
-            ues = session.query(UE).filter_by(semester_id=sem.id).all()
-            for ue in ues:
-                session.add(StudentUEEnrollment(student_id=student_id, ue_id=ue.id))
-                added += 1
+            for ue in session.query(UE).filter_by(semester_id=sem.id).all():
+                exists = session.query(StudentUEEnrollment).filter_by(
+                    student_id=student_id, ue_id=ue.id).first()
+                if not exists:
+                    session.add(StudentUEEnrollment(student_id=student_id, ue_id=ue.id))
+                    added += 1
 
-        # Mémoriser la formation principale de l'étudiant
+        # Mémoriser la formation principale
         student.formation_id = formation_id
         session.commit()
         session.close()
@@ -1659,7 +1663,7 @@ def set_student_formation(student_id):
             'success': True,
             'added': added,
             'formation_name': formation.name,
-            'message': f'Étudiant affecté à {formation.name} — {added} UE(s) inscrite(s).'
+            'message': f'Formation principale : {formation.name} — {added} UE(s) ajoutée(s).'
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
