@@ -1614,10 +1614,61 @@ def get_student_enrollments(student_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/admin/students/<int:student_id>/set_formation', methods=['POST'])
+@jwt_required()
+def set_student_formation(student_id):
+    """Affecter un étudiant à une Formation — remplace toutes ses inscriptions UE existantes (logique LMD)"""
+    try:
+        user_id = int(get_jwt_identity())
+        session = get_session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if user.role != UserRole.ADMIN:
+            session.close()
+            return jsonify({'error': 'Accès non autorisé'}), 403
+        data = request.get_json() or {}
+        formation_id = data.get('formation_id')
+        if not formation_id:
+            session.close()
+            return jsonify({'error': 'formation_id requis'}), 400
+        student = session.query(User).filter_by(id=student_id, role=UserRole.STUDENT).first()
+        if not student:
+            session.close()
+            return jsonify({'error': 'Étudiant non trouvé'}), 404
+        formation = session.query(Formation).filter_by(id=formation_id).first()
+        if not formation:
+            session.close()
+            return jsonify({'error': 'Formation non trouvée'}), 404
+
+        # Supprimer TOUTES les inscriptions UE actuelles
+        session.query(StudentUEEnrollment).filter_by(student_id=student_id).delete()
+
+        # Inscrire à toutes les UEs de la formation choisie
+        semesters = session.query(Semester).filter_by(formation_id=formation_id).all()
+        added = 0
+        for sem in semesters:
+            ues = session.query(UE).filter_by(semester_id=sem.id).all()
+            for ue in ues:
+                session.add(StudentUEEnrollment(student_id=student_id, ue_id=ue.id))
+                added += 1
+
+        # Mémoriser la formation principale de l'étudiant
+        student.formation_id = formation_id
+        session.commit()
+        session.close()
+        return jsonify({
+            'success': True,
+            'added': added,
+            'formation_name': formation.name,
+            'message': f'Étudiant affecté à {formation.name} — {added} UE(s) inscrite(s).'
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/students/<int:student_id>/enroll_formation', methods=['POST'])
 @jwt_required()
 def enroll_student_formation(student_id):
-    """Inscrire un étudiant à toutes les UEs d'une Formation (logique LMD standard)"""
+    """Ajouter les UEs d'une Formation sans supprimer les inscriptions existantes"""
     try:
         user_id = int(get_jwt_identity())
         session = get_session()
@@ -2070,7 +2121,17 @@ def get_students_list():
             return jsonify({'error': 'Accès non autorisé'}), 403
 
         students = session.query(User).filter_by(role=UserRole.STUDENT).order_by(User.full_name).all()
-        students_list = [{'id': s.id, 'full_name': s.full_name, 'email': s.email} for s in students]
+        students_list = []
+        for s in students:
+            formation = session.query(Formation).filter_by(id=s.formation_id).first() if getattr(s, 'formation_id', None) else None
+            students_list.append({
+                'id':             s.id,
+                'full_name':      s.full_name,
+                'email':          s.email,
+                'formation_id':   s.formation_id if hasattr(s, 'formation_id') else None,
+                'formation_name': formation.name if formation else None,
+                'formation_code': formation.code if formation else None,
+            })
         session.close()
 
         return jsonify(students_list)

@@ -4458,40 +4458,45 @@ async function loadStudentEnrollments() {
                 Aucun étudiant enregistré. Créez d'abord des comptes étudiants.
                </div>`
             : students.map(s => {
-                const initials = s.full_name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+                const initials = (s.full_name||s.email||'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
                 const enrollments = enrollmentsByStudent[s.id] || [];
 
-                // Tags des UEs inscrites
+                // Badge formation actuelle
+                const formationBadge = s.formation_id
+                    ? `<span style="display:inline-flex;align-items:center;gap:4px;background:#dcfce7;color:#15803d;border:1px solid #bbf7d0;border-radius:99px;padding:2px 9px;font-size:11px;font-weight:700;">
+                          <i class="fas fa-graduation-cap" style="font-size:9px;"></i> ${s.formation_code || s.formation_name}
+                       </span>`
+                    : `<span style="display:inline-flex;align-items:center;gap:4px;background:#fef3c7;color:#b45309;border:1px solid #fde68a;border-radius:99px;padding:2px 9px;font-size:11px;font-weight:600;">
+                          <i class="fas fa-triangle-exclamation" style="font-size:9px;"></i> Sans formation
+                       </span>`;
+
+                // Tags UEs de la formation actuelle vs UEs hors formation
                 const ueTagsHtml = enrollments.length === 0
-                    ? `<span style="font-size:12px;color:#94a3b8;font-style:italic;">Aucune inscription</span>`
+                    ? `<span style="font-size:12px;color:#94a3b8;font-style:italic;">Aucune UE</span>`
                     : enrollments.map(e => `
-                        <span style="display:inline-flex;align-items:center;gap:4px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;">
-                            <i class="fas fa-layer-group" style="font-size:9px;"></i>
+                        <span style="display:inline-flex;align-items:center;gap:4px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:99px;padding:2px 8px;font-size:11px;font-weight:600;"
+                              title="${e.ue_name} (${e.formation_name})">
                             ${e.ue_code}
-                            <button onclick="unenrollStudent(${e.enrollment_id}, ${s.id})"
-                                style="background:none;border:none;cursor:pointer;color:#94a3b8;padding:0 0 0 2px;line-height:1;font-size:11px;"
-                                title="Désinscrire de ${e.ue_name}">&#x2715;</button>
                         </span>`).join('');
 
                 return `
-                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px 18px;display:flex;align-items:flex-start;gap:14px;">
-                    <div style="width:40px;height:40px;border-radius:50%;background:#dbeafe;color:#1d4ed8;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${initials}</div>
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px 18px;display:flex;align-items:center;gap:14px;">
+                    <div style="width:38px;height:38px;border-radius:50%;background:#dbeafe;color:#1d4ed8;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${initials}</div>
                     <div style="flex:1;min-width:0;">
-                        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-                            <div>
-                                <div style="font-size:14px;font-weight:700;color:#0f172a;">${s.full_name}</div>
-                                <div style="font-size:12px;color:#64748b;"><i class="fas fa-envelope" style="font-size:10px;margin-right:3px;"></i>${s.email}</div>
-                            </div>
-                            <button onclick="showManageEnrollmentsModal(${s.id}, '${(s.full_name||'').replace(/'/g,"\\'")}', window._formationsCache)"
-                                style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:#3b82f6;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">
-                                <i class="fas fa-pen-to-square"></i> Gérer les inscriptions
-                            </button>
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+                            <span style="font-size:14px;font-weight:700;color:#0f172a;">${s.full_name || s.email}</span>
+                            ${formationBadge}
                         </div>
-                        <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:6px;"><i class="fas fa-envelope" style="font-size:10px;margin-right:3px;"></i>${s.email}</div>
+                        <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
                             <span style="font-size:11px;color:#64748b;font-weight:600;margin-right:2px;">UEs :</span>
                             ${ueTagsHtml}
                         </div>
                     </div>
+                    <button onclick="showSetFormationModal(${s.id}, '${(s.full_name||s.email||'').replace(/'/g,"\\'")}', window._formationsCache)"
+                        style="display:inline-flex;align-items:center;gap:6px;padding:7px 13px;background:${s.formation_id ? '#f8fafc' : '#3b82f6'};color:${s.formation_id ? '#334155' : '#fff'};border:1px solid ${s.formation_id ? '#e2e8f0' : '#3b82f6'};border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;">
+                        <i class="fas fa-${s.formation_id ? 'pen' : 'plus'}"></i> ${s.formation_id ? 'Changer' : 'Affecter'}
+                    </button>
                 </div>`;
             }).join('');
 
@@ -4560,107 +4565,55 @@ async function loadStudentEnrollments() {
     }
 }
 
-async function showManageEnrollmentsModal(studentId, studentName, formations) {
-    showLoader(true);
-    try {
-        const r = await authenticatedFetch(`/api/admin/students/${studentId}/enrollments`);
-        const currentEnrollments = r.ok ? await r.json() : [];
-        const enrolledUeIds = new Set(currentEnrollments.map(e => e.ue_id));
-
-        const formationBlocks = (formations || []).map(f => {
-            const allUes = (f.semesters || []).flatMap(s => (s.ues || []).map(u => ({...u, semester_name: s.name})));
-            if (!allUes.length) return '';
-            const allChecked = allUes.every(u => enrolledUeIds.has(u.id));
-            const checkboxes = allUes.map(u => `
-                <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px;color:#334155;${enrolledUeIds.has(u.id)?'background:#eff6ff;':''}">
-                    <input type="checkbox" data-ue-id="${u.id}" data-formation-id="${f.id}"
-                        ${enrolledUeIds.has(u.id) ? 'checked' : ''}
-                        style="width:15px;height:15px;accent-color:#3b82f6;flex-shrink:0;"
-                        onchange="this.closest('label').style.background=this.checked?'#eff6ff':''">
-                    <span>
-                        <strong style="color:#0f172a;">${u.code}</strong>
-                        <span style="color:#64748b;"> — ${u.name}</span>
-                        <span style="font-size:11px;color:#94a3b8;"> (${u.semester_name})</span>
-                    </span>
-                </label>`).join('');
-
-            return `
-                <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:10px;">
-                    <div style="background:#f8fafc;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;">
-                        <div>
-                            <span style="font-weight:700;font-size:13px;color:#0f172a;">${f.code}</span>
-                            <span style="font-size:12px;color:#64748b;margin-left:6px;">— ${f.name}</span>
-                        </div>
-                        <button onclick="enrollStudentFormation(${studentId}, ${f.id})"
-                            style="font-size:11px;padding:5px 10px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;white-space:nowrap;">
-                            <i class="fas fa-bolt"></i> Inscrire à toutes les UEs
-                        </button>
-                    </div>
-                    <div style="padding:8px 10px;display:flex;flex-direction:column;gap:2px;">${checkboxes}</div>
-                </div>`;
-        }).join('');
-
-        showModal(`
-            <div>
-                <h3 style="margin:0 0 4px;font-size:17px;font-weight:700;"><i class="fas fa-pen-to-square" style="color:#3b82f6;margin-right:8px;"></i>Inscriptions de ${studentName}</h3>
-                <p style="margin:0 0 14px;font-size:13px;color:#64748b;">Cochez les UEs auxquelles l'étudiant doit être inscrit. Ou utilisez <strong>Inscrire à toutes les UEs</strong> pour inscrire à toute une formation d'un clic.</p>
-                <div style="max-height:55vh;overflow-y:auto;padding-right:4px;">${formationBlocks || '<p style="color:#94a3b8;text-align:center;">Aucune formation disponible.</p>'}</div>
-                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;padding-top:14px;border-top:1px solid #f1f5f9;">
-                    <button class="btn btn-secondary" onclick="closeModal()">Annuler</button>
-                    <button class="btn btn-primary" onclick="saveEnrollmentChanges(${studentId})"><i class="fas fa-save"></i> Enregistrer</button>
+function showSetFormationModal(studentId, studentName, formations) {
+    const formationCards = (formations || []).map(f => {
+        const ueCount = (f.semesters || []).reduce((n, s) => n + (s.ues || []).length, 0);
+        const semCount = (f.semesters || []).length;
+        return `
+            <div onclick="confirmSetFormation(${studentId}, ${f.id}, '${f.name.replace(/'/g,"\\'")}')"
+                style="border:1.5px solid #e2e8f0;border-radius:10px;padding:14px 16px;cursor:pointer;transition:all .15s;"
+                onmouseover="this.style.borderColor='#3b82f6';this.style.background='#eff6ff';"
+                onmouseout="this.style.borderColor='#e2e8f0';this.style.background='#fff';">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                    <span style="font-weight:700;font-size:14px;color:#0f172a;">${f.code}</span>
+                    <span style="font-size:11px;background:#f1f5f9;color:#64748b;padding:2px 8px;border-radius:99px;">${f.level || ''}</span>
                 </div>
-            </div>`, '600px');
-    } finally { showLoader(false); }
+                <div style="font-size:13px;color:#475569;margin-bottom:8px;">${f.name}</div>
+                <div style="display:flex;gap:10px;">
+                    <span style="font-size:11px;color:#64748b;"><i class="fas fa-calendar" style="margin-right:3px;"></i>${semCount} semestre(s)</span>
+                    <span style="font-size:11px;color:#64748b;"><i class="fas fa-layer-group" style="margin-right:3px;"></i>${ueCount} UE(s)</span>
+                </div>
+            </div>`;
+    }).join('');
+
+    showModal(`
+        <div>
+            <h3 style="margin:0 0 4px;font-size:17px;font-weight:700;">
+                <i class="fas fa-graduation-cap" style="color:#3b82f6;margin-right:8px;"></i>Affecter à une Formation
+            </h3>
+            <p style="margin:0 0 16px;font-size:13px;color:#64748b;">
+                Étudiant : <strong>${studentName}</strong><br>
+                <span style="color:#ef4444;font-weight:600;">⚠ Les inscriptions UE actuelles seront remplacées</span> par celles de la formation choisie.
+            </p>
+            <div style="display:flex;flex-direction:column;gap:8px;max-height:55vh;overflow-y:auto;">
+                ${formationCards || '<p style="color:#94a3b8;text-align:center;">Aucune formation disponible.</p>'}
+            </div>
+            <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f1f5f9;text-align:right;">
+                <button class="btn btn-secondary" onclick="closeModal()">Annuler</button>
+            </div>
+        </div>`, '500px');
 }
 
-async function saveEnrollmentChanges(studentId) {
-    const checkboxes = document.querySelectorAll('#modal-container input[type=checkbox][data-ue-id]');
-    showLoader(true);
-    let added = 0, removed = 0, errors = 0;
-
-    // Récupérer l'état actuel
-    const r = await authenticatedFetch(`/api/admin/students/${studentId}/enrollments`);
-    const current = r.ok ? await r.json() : [];
-    const enrolledMap = {}; // ue_id → enrollment_id
-    current.forEach(e => { enrolledMap[e.ue_id] = e.enrollment_id; });
-
-    for (const cb of checkboxes) {
-        const ueId   = parseInt(cb.dataset.ueId);
-        const checked = cb.checked;
-        const wasEnrolled = !!enrolledMap[ueId];
-
-        if (checked && !wasEnrolled) {
-            const res = await authenticatedFetch(`/api/admin/students/${studentId}/enroll`, {
-                method: 'POST', body: JSON.stringify({ ue_id: ueId })
-            });
-            if (res.ok) added++; else errors++;
-        } else if (!checked && wasEnrolled) {
-            const res = await authenticatedFetch(`/api/admin/student_enrollments/${enrolledMap[ueId]}`, {
-                method: 'DELETE'
-            });
-            if (res.ok) removed++; else errors++;
-        }
-    }
-    showLoader(false);
+async function confirmSetFormation(studentId, formationId, formationName) {
     closeModal();
-    const parts = [];
-    if (added)   parts.push(`${added} ajoutée(s)`);
-    if (removed) parts.push(`${removed} supprimée(s)`);
-    if (errors)  parts.push(`${errors} erreur(s)`);
-    showAlert(parts.length ? parts.join(', ') + '.' : 'Aucun changement.', errors ? 'warning' : 'success');
-    loadStudentEnrollments();
-}
-
-async function enrollStudentFormation(studentId, formationId) {
     showLoader(true);
-    const res = await authenticatedFetch(`/api/admin/students/${studentId}/enroll_formation`, {
+    const res = await authenticatedFetch(`/api/admin/students/${studentId}/set_formation`, {
         method: 'POST', body: JSON.stringify({ formation_id: formationId })
     });
     const data = await res.json();
     showLoader(false);
     if (data.success) {
         showAlert(data.message, 'success');
-        closeModal();
         loadStudentEnrollments();
     } else {
         showAlert(data.error || 'Erreur.', 'error');

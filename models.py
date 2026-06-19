@@ -212,6 +212,8 @@ class User(Base):
     reset_token_expires = Column(DateTime, nullable=True)
     notifications_last_read = Column(DateTime, nullable=True)
 
+    formation_id = Column(Integer, ForeignKey('formations.id'), nullable=True)  # formation principale de l'étudiant
+
     created_subjects = relationship('Subject', foreign_keys='Subject.creator_id', back_populates='creator')
     student_papers = relationship('StudentPaper', foreign_keys='StudentPaper.student_id', back_populates='student')
     corrected_papers = relationship('StudentPaper', foreign_keys='StudentPaper.corrected_by_id', back_populates='corrector')
@@ -783,6 +785,9 @@ def init_db():
         # #7 — image attachée au sujet
         ("SELECT 1 FROM information_schema.columns WHERE table_name='subjects' AND column_name='image_filename'",
          "ALTER TABLE subjects ADD COLUMN image_filename VARCHAR(255)"),
+        # formation principale de l'étudiant
+        ("SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='formation_id'",
+         "ALTER TABLE users ADD COLUMN formation_id INTEGER REFERENCES formations(id) ON DELETE SET NULL"),
     ]
     with engine.connect() as _conn:
         # Timeout court pour éviter le blocage au démarrage si l'app tourne déjà
