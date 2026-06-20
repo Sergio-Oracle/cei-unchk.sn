@@ -18,7 +18,8 @@ from botocore.config import Config
 from models import (
     get_session, ExamAttempt, OnlineExam, ExamActivityLog, User,
     AttemptStatus, UserRole, ExamStatus, CameraLog,
-    ExamProctor, ProctorAssignment, Subject, EC, UE, StudentUEEnrollment
+    ExamProctor, ProctorAssignment, Subject, EC, UE, StudentUEEnrollment,
+    ECAssignment
 )
 
 proctoring_bp = Blueprint('proctoring', __name__)
@@ -975,25 +976,38 @@ def distribute_proctors(exam_id):
             # Priorité 2 : étudiants inscrits à l'UE du sujet (pré-affectation)
             subject = session.query(Subject).filter_by(id=exam.subject_id).first()
             enrolled_students = []
+
+            # Voie A : via ec_id du sujet → UE → étudiants inscrits
             if subject and subject.ec_id:
                 ec = session.query(EC).filter_by(id=subject.ec_id).first()
                 if ec:
-                    enrollments = session.query(StudentUEEnrollment).join(
-                        User, StudentUEEnrollment.student_id == User.id
+                    enrolled_students = session.query(User).join(
+                        StudentUEEnrollment, User.id == StudentUEEnrollment.student_id
                     ).filter(
-                        StudentUEEnrollment.ue_id == ec.ue_id
+                        StudentUEEnrollment.ue_id == ec.ue_id,
+                        User.role == UserRole.STUDENT
                     ).order_by(User.full_name).all()
-                    enrolled_students = [e.student for e in enrollments if e.student]
+
+            # Voie B (fallback) : via ECAssignments du créateur de l'examen
+            if not enrolled_students:
+                creator = session.query(User).filter_by(id=exam.created_by_id).first()
+                if creator and creator.role == UserRole.PROFESSOR:
+                    assignments = session.query(ECAssignment).filter_by(professor_id=creator.id).all()
+                    ue_ids = list({a.ec.ue_id for a in assignments if a.ec and a.ec.ue_id})
+                    if ue_ids:
+                        enrolled_students = session.query(User).join(
+                            StudentUEEnrollment, User.id == StudentUEEnrollment.student_id
+                        ).filter(
+                            StudentUEEnrollment.ue_id.in_(ue_ids),
+                            User.role == UserRole.STUDENT
+                        ).distinct().order_by(User.full_name).all()
 
             if not enrolled_students:
-                # Pas de UE liée au sujet — répartition en attente (lazy)
-                # Les assignments seront créés dynamiquement quand les étudiants démarrent
                 subject_info = f"sujet n°{exam.subject_id}" if exam.subject_id else "sujet inconnu"
                 session.close()
                 return jsonify({
-                    'warning': f'Aucun étudiant pré-inscrit trouvé ({subject_info} sans EC/UE lié). '
-                               'Les surveillants sont bien affectés : la répartition des étudiants '
-                               'se fera automatiquement dès qu\'ils démarrent l\'examen.',
+                    'warning': f'Aucun étudiant pré-inscrit trouvé ({subject_info} — aucun EC/UE lié au sujet ni aux ECs du professeur). '
+                               'Les surveillants sont bien affectés : la répartition se fera automatiquement quand les étudiants démarrent.',
                     'mode': 'lazy',
                     'proctors': nb_proctors,
                     'total_students': 0
