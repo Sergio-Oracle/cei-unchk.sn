@@ -1145,34 +1145,51 @@ async function init() {
 // RENDU DE L'EXAMEN
 // ═══════════════════════════════════════════════════════════
 
+// ─── Rendu markdown simple → HTML ──────────────────────────
+function _mdToHtml(text) {
+    return escapeHtml(text)
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/^---+$/gm, '<hr style="border-color:#e2e8f0;margin:8px 0;">')
+        .replace(/^\*\s+(.+)$/gm, '<li style="margin-left:16px;margin-bottom:4px;">$1</li>')
+        .replace(/\n/g, '<br>');
+}
+
 // ─── Parsing des blocs QCM / Ouvertes ─────────────────────────
 function _parseExamBlocks(raw) {
-    // Reconnaît : "1. ...", "1) ...", "Question 1 — ...", "Question 1. ..."
+    // Reconnaît les formats : "1. ...", "1) ...", "Question 1 — ...", "**Question 1 — ...**"
     const QNUM  = /^(?:Question\s+)?(\d{1,2})\s*(?:[.)\-:]|—|–)\s*(.*)/i;
-    // Reconnaît : "a) ...", "A. ...", "a- ..."
     const CHOIX = /^([A-Fa-f])\s*[.)\-:]\s*(.*)/;
+
+    // Nettoyer une ligne des marqueurs markdown
+    const clean = l => l.trim().replace(/^\*{1,2}\s*/, '').replace(/\s*\*{1,2}$/, '').replace(/^\s*---+\s*$/, '').trim();
+
     const lines = raw.split('\n');
     const blocks = [];
     let i = 0;
     const preamble = [];
-    while (i < lines.length && !lines[i].trim().match(QNUM)) { preamble.push(lines[i]); i++; }
+
+    // Preamble = tout avant la première question détectée
+    while (i < lines.length && !clean(lines[i]).match(QNUM)) { preamble.push(lines[i]); i++; }
     if (preamble.join('').trim()) blocks.push({ type: 'text', content: preamble.join('\n') });
+
     while (i < lines.length) {
-        const line = lines[i].trim();
-        const qm = line.match(QNUM);
+        const cl = clean(lines[i]);
+        const qm = cl.match(QNUM);
         if (!qm) { i++; continue; }
-        const num = qm[1]; const qText = qm[2]; i++;
+        const num = qm[1];
+        const qText = qm[2].replace(/^\*+|\*+$/g, '').trim();
+        i++;
         const extraLines = []; const choices = [];
         while (i < lines.length) {
-            const nl = lines[i].trim();
-            if (!nl) { i++; if (choices.length >= 2) break; continue; }
+            const nl = clean(lines[i]);
+            if (!nl || nl === '---') { i++; if (choices.length >= 2) break; continue; }
             if (nl.match(QNUM) && !nl.match(CHOIX)) break;
             const cm = nl.match(CHOIX);
-            if (cm) { choices.push({ letter: cm[1].toUpperCase(), text: cm[2] }); i++; }
-            else if (choices.length === 0) { extraLines.push(nl); i++; }
+            if (cm) { choices.push({ letter: cm[1].toUpperCase(), text: cm[2].replace(/^\*+|\*+$/g,'').trim() }); i++; }
+            else if (choices.length === 0) { extraLines.push(lines[i]); i++; }
             else break;
         }
-        // Si les "choix" contiennent des points (ex: "(1 pt)", "(2 pts)") → sous-questions ouvertes
         const hasPoints = choices.length >= 1 && choices.some(c => /\(\d+\s*pts?\)/i.test(c.text));
         const type = hasPoints ? 'subopen' : (choices.length >= 2 ? 'qcm' : 'open');
         blocks.push({ type, num, text: qText, extraLines, choices });
@@ -1311,23 +1328,55 @@ function renderExam() {
         savedTexte = saved.texte || {};
     } catch(e) {}
 
-    // Section instructions
-    let preambleHtml = '';
+    // ── Panneau sujet complet (toujours accessible, rétractable) ──
+    // Extraire juste les instructions courtes du préambule
+    let instructionsTxt = '';
     if (preamble) {
-        const txt = preamble.content.replace(/══+/g,'').replace(/──+/g,'').trim();
-        if (txt) preambleHtml = `
-        <div class="subject-card" style="border-left:4px solid var(--primary);margin-bottom:18px;">
-            <h2 style="margin-bottom:10px;"><i class="fas fa-info-circle" style="color:var(--primary)"></i> Instructions</h2>
-            <div style="font-size:14px;line-height:1.8;color:var(--dark);white-space:pre-wrap;">${escapeHtml(txt)}</div>
-        </div>`;
+        const lines = preamble.content.split('\n');
+        const instrLines = [];
+        let inInstr = false;
+        for (const l of lines) {
+            const cl = l.replace(/══+|──+/g,'').trim();
+            if (/INSTRUCTION/i.test(cl)) { inInstr = true; continue; }
+            if (inInstr && cl && !/QUESTIONS?/i.test(cl)) instrLines.push(cl);
+            if (/QUESTIONS?/i.test(cl)) break;
+        }
+        instructionsTxt = instrLines.filter(Boolean).join('\n').trim();
     }
+
+    // Rendu du sujet complet avec markdown basique
+    const rawHtml = raw
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+        .replace(/^\*\s+(.+)$/gm,'<li style="margin-left:16px;">$1</li>')
+        .replace(/^---+$/gm,'<hr style="border:none;border-top:1px solid #e2e8f0;margin:8px 0;">')
+        .replace(/══+/g,'<hr style="border:none;border-top:2px solid #3b82f6;margin:6px 0;">')
+        .replace(/──+/g,'<hr style="border:none;border-top:1px solid #cbd5e1;margin:4px 0;">')
+        .replace(/\n/g,'<br>');
+
+    const refPanel = `
+    <div style="margin-bottom:18px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+        <button onclick="const b=document.getElementById('ref-body');const ic=document.getElementById('ref-ic');b.style.display=b.style.display==='none'?'block':'none';ic.className=b.style.display==='none'?'fas fa-chevron-down':'fas fa-chevron-up';"
+            style="width:100%;display:flex;align-items:center;gap:10px;padding:12px 16px;background:#f8fafc;border:none;cursor:pointer;text-align:left;font-size:14px;font-weight:600;color:#1e293b;">
+            <i class="fas fa-file-alt" style="color:#3b82f6;"></i>
+            <span style="flex:1;">Consulter le sujet complet</span>
+            <i id="ref-ic" class="fas fa-chevron-down" style="color:#64748b;font-size:12px;"></i>
+        </button>
+        <div id="ref-body" style="display:none;max-height:450px;overflow-y:auto;padding:16px 20px;font-size:13px;line-height:1.8;color:#374151;border-top:1px solid #e2e8f0;">${rawHtml}</div>
+    </div>`;
+
+    // Instructions courtes (si détectées)
+    const instrPanel = instructionsTxt ? `
+    <div style="background:#eff6ff;border-left:4px solid #3b82f6;border-radius:0 8px 8px 0;padding:12px 16px;margin-bottom:18px;font-size:13px;color:#1e40af;line-height:1.7;">
+        <strong><i class="fas fa-info-circle"></i> Instructions :</strong><br>${escapeHtml(instructionsTxt)}
+    </div>` : '';
 
     // Aucune question → textarea classique
     if (!allQuestions.length) {
-        content.innerHTML = (preambleHtml || `<div class="subject-card"><h2><i class="fas fa-file-alt"></i> Sujet</h2><div class="content-text">${escapeHtml(raw)}</div></div>`) + `
+        content.innerHTML = refPanel + instrPanel + `
         <div class="answer-card">
             <h2><i class="fas fa-pen" style="color:var(--success)"></i> Votre réponse</h2>
-            <textarea id="answer-area" class="answer-textarea" placeholder="Rédigez votre réponse ici…">${escapeHtml(subjectData.current_answer || '')}</textarea>
+            <textarea id="answer-area" class="answer-textarea" placeholder="Rédigez vos réponses ici en indiquant le numéro de chaque question…">${escapeHtml(subjectData.current_answer || '')}</textarea>
             <div class="save-indicator" id="save-indicator">
                 <i class="fas fa-circle-notch fa-spin" style="display:none" id="save-spinner"></i>
                 <span id="save-text">Les réponses sont sauvegardées automatiquement</span>
@@ -1335,6 +1384,8 @@ function renderExam() {
         </div>`;
         return;
     }
+
+    const preambleHtml = refPanel + instrPanel;
 
     // Séparer QCM (Partie 1) et Questions ouvertes (Partie 2)
     const p1Questions = allQuestions.filter(b => b.type === 'qcm');

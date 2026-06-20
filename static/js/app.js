@@ -7735,18 +7735,18 @@ function _esc(s) {
 }
 
 function _parseExamBlocks(raw) {
-    // Retourne un tableau de blocs : {type:'text'|'qcm'|'open', num, text, extraLines, choices}
-    const QNUM  = /^(?:Question\s+)?(\d{1,2})\s*(?:[.)\-:]|—|–)\s*(.*)/i;  // 1. 1) Question 1 — ...
-    const CHOIX = /^([A-Fa-f])\s*[.)\-:]\s*(.*)/;    // A)  A.  a)  a-  ...
-    const VF_Q  = /\bvrai\s*[/\/|]\s*faux\b|\bv\s*[/\/|]\s*f\b/i;   // #23 — Vrai/Faux
+    const QNUM  = /^(?:Question\s+)?(\d{1,2})\s*(?:[.)\-:]|—|–)\s*(.*)/i;
+    const CHOIX = /^([A-Fa-f])\s*[.)\-:]\s*(.*)/;
+    const VF_Q  = /\bvrai\s*[/\/|]\s*faux\b|\bv\s*[/\/|]\s*f\b/i;
+
+    const clean = l => l.trim().replace(/^\*{1,2}\s*/, '').replace(/\s*\*{1,2}$/, '').replace(/^\s*---+\s*$/, '').trim();
 
     const lines = raw.split('\n');
     const blocks = [];
     let i = 0;
     const preamble = [];
 
-    // Preamble : tout ce qui précède la première question numérotée
-    while (i < lines.length && !lines[i].trim().match(QNUM)) {
+    while (i < lines.length && !clean(lines[i]).match(QNUM)) {
         preamble.push(lines[i]);
         i++;
     }
@@ -7754,39 +7754,34 @@ function _parseExamBlocks(raw) {
         blocks.push({ type: 'text', content: preamble.join('\n') });
     }
 
-    // Questions
     while (i < lines.length) {
-        const line = lines[i].trim();
-        const qm = line.match(QNUM);
+        const cl = clean(lines[i]);
+        const qm = cl.match(QNUM);
         if (!qm) { i++; continue; }
 
         const num   = qm[1];
-        const qText = qm[2];
+        const qText = qm[2].replace(/^\*+|\*+$/g, '').trim();
         i++;
 
         const extraLines = [];
         const choices    = [];
 
         while (i < lines.length) {
-            const nl = lines[i].trim();
-            if (!nl) {
+            const nl = clean(lines[i]);
+            if (!nl || nl === '---') {
                 i++;
-                // Ligne vide après des choix = fin du bloc QCM
                 if (choices.length >= 2) break;
                 continue;
             }
-            // Prochaine question numérotée → fin du bloc courant
             if (nl.match(QNUM) && !nl.match(CHOIX)) break;
             const cm = nl.match(CHOIX);
             if (cm) {
-                choices.push({ letter: cm[1].toUpperCase(), text: cm[2] });
+                choices.push({ letter: cm[1].toUpperCase(), text: cm[2].replace(/^\*+|\*+$/g,'').trim() });
                 i++;
             } else if (choices.length === 0) {
-                // Texte supplémentaire avant les choix
-                extraLines.push(nl);
+                extraLines.push(lines[i]);
                 i++;
             } else {
-                // Texte après les choix → fin du bloc
                 break;
             }
         }
